@@ -1,1 +1,94 @@
-:root{--bg:#111;--text:#fff}body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text);text-align:center}section{display:none}section.active{display:block}nav{position:fixed;bottom:0;width:100%}button{padding:12px;margin:5px}
+:root{
+  --bg:#0f0f14;
+  --card:#1b1b22;
+  --text:#f5f5f5;
+  --accent:#e6b85c;
+}
+
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,system-ui;
+  background:var(--bg);
+  color:var(--text);
+}
+
+#app{
+  padding:20px;
+  padding-bottom:80px;
+}
+
+section{display:none}
+section.active{display:block}
+
+h1{
+  font-size:64px;
+  margin:40px 0 20px;
+  letter-spacing:2px;
+}
+
+.controls{
+  display:flex;
+  justify-content:center;
+  gap:12px;
+  margin-bottom:20px;
+}
+
+button{
+  border:none;
+  padding:14px 18px;
+  border-radius:12px;
+  background:var(--card);
+  color:var(--text);
+  font-size:16px;
+  transition:0.2s;
+}
+
+button:active{
+  transform:scale(0.96);
+}
+
+#todayCount{
+  opacity:0.8;
+  margin-top:10px;
+}
+
+nav{
+  position:fixed;
+  bottom:0;
+  left:0;
+  right:0;
+  display:flex;
+  justify-content:space-around;
+  background:var(--card);
+  padding:10px 0;
+  border-top:1px solid rgba(255,255,255,0.05);
+}
+
+nav button{
+  background:none;
+  font-size:14px;
+  opacity:0.7;
+}
+
+nav button:hover{
+  opacity:1;
+}
+
+/* modal */
+#modal{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(0,0,0,0.6);
+}
+
+.hidden{display:none}
+
+.modal-content{
+  background:var(--card);
+  padding:20px;
+  border-radius:16px;
+  text-align:center;
+}
