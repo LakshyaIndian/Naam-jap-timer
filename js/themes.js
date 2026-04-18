@@ -1,0 +1,1 @@
+const themes=[{name:"Deep Maroon",bg:"#3b0d0d",text:"#fff"},{name:"Lotus Pink",bg:"#ffe4ec",text:"#000"},{name:"Temple White",bg:"#ffffff",text:"#000"}];function applyTheme(t){document.documentElement.style.setProperty("--bg",t.bg);document.documentElement.style.setProperty("--text",t.text)}
