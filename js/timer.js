@@ -3,11 +3,16 @@ const TIMER_DURATION = 8 * 60 * 1000;
 let timerState = {
   startTime: null,
   elapsedBeforePause: 0,
-  running: false
+  running: false,
+  startDate: null
 };
 
 function startTimer() {
   if (timerState.running) return;
+
+  if (!timerState.startDate) {
+    timerState.startDate = new Date().toISOString().split("T")[0];
+  }
 
   timerState.startTime = Date.now();
   timerState.running = true;
@@ -23,7 +28,7 @@ function pauseTimer() {
 }
 
 function resetTimer() {
-  timerState = { startTime: null, elapsedBeforePause: 0, running: false };
+  timerState = { startTime: null, elapsedBeforePause: 0, running: false, startDate: null };
   persistTimer();
   updateDisplay(TIMER_DURATION);
   updateRing(0);
@@ -55,18 +60,30 @@ function tick() {
   if (remaining <= 0) {
     timerState.running = false;
     persistTimer();
-    onTimerComplete();
+
+    // midnight-safe completion
+    const today = new Date().toISOString().split("T")[0];
+    const sameDay = timerState.startDate === today;
+
+    onTimerComplete(sameDay);
   }
 }
 
 setInterval(tick, 1000);
 
 function persistTimer() {
-  localStorage.setItem("timer_state", JSON.stringify(timerState));
+  try{
+    localStorage.setItem("timer_state", JSON.stringify(timerState));
+  }catch{}
 }
 
 function restoreTimer() {
   try {
-    timerState = JSON.parse(localStorage.getItem("timer_state")) || timerState;
-  } catch {}
+    const parsed = JSON.parse(localStorage.getItem("timer_state"));
+    if(parsed && typeof parsed === 'object'){
+      timerState = parsed;
+    }
+  } catch {
+    timerState = { startTime:null, elapsedBeforePause:0, running:false, startDate:null };
+  }
 }
