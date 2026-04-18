@@ -10,11 +10,31 @@ body{
   font-family:-apple-system,BlinkMacSystemFont,system-ui;
   background:var(--bg);
   color:var(--text);
+  position:relative;
+  overflow-x:hidden;
+}
+
+/* Spiritual watermark background */
+body::before{
+  content:"राधावल्लभ श्री हरिवंश राधावल्लभ श्री हरिवंश राधावल्लभ श्री हरिवंश";
+  position:fixed;
+  top:0;
+  left:0;
+  width:200%;
+  height:200%;
+  font-size:32px;
+  line-height:60px;
+  color:rgba(255,255,255,0.03);
+  white-space:repeat;
+  transform:rotate(-20deg);
+  pointer-events:none;
 }
 
 #app{
   padding:20px;
   padding-bottom:80px;
+  position:relative;
+  z-index:1;
 }
 
 section{display:none}
@@ -74,7 +94,6 @@ nav button:hover{
   opacity:1;
 }
 
-/* modal */
 #modal{
   position:fixed;
   inset:0;
