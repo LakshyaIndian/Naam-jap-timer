@@ -1,1 +1,31 @@
-function updateDisplay(ms){let sec=Math.floor(ms/1000);let m=String(Math.floor(sec/60)).padStart(2,"0");let s=String(sec%60).padStart(2,"0");document.getElementById("timerDisplay").innerText=`${m}:${s}`}function showModal(){document.getElementById("modal").classList.remove("hidden")}function closeModal(){document.getElementById("modal").classList.add("hidden")}function onTimerComplete(){try{navigator.vibrate?.(200)}catch{}showModal()}function initUI(){document.querySelectorAll("nav button").forEach(btn=>{btn.onclick=()=>{document.querySelectorAll("section").forEach(s=>s.classList.remove("active"));document.getElementById(btn.dataset.tab).classList.add("active")}})}
+function updateDisplay(ms){
+  let sec=Math.floor(ms/1000);
+  let m=String(Math.floor(sec/60)).padStart(2,"0");
+  let s=String(sec%60).padStart(2,"0");
+  document.getElementById("timerDisplay").innerText=`${m}:${s}`;
+}
+
+function updateRing(progress){
+  const ring=document.querySelector(".ring");
+  if(!ring) return;
+  const deg=progress*360;
+  ring.style.background=`conic-gradient(var(--accent) ${deg}deg, rgba(255,255,255,0.05) ${deg}deg)`;
+}
+
+function showModal(){document.getElementById("modal").classList.remove("hidden")}
+function closeModal(){document.getElementById("modal").classList.add("hidden")}
+
+function onTimerComplete(){
+  try{navigator.vibrate?.(200)}catch{}
+  updateRing(1);
+  showModal();
+}
+
+function initUI(){
+  document.querySelectorAll("nav button").forEach(btn=>{
+    btn.onclick=()=>{
+      document.querySelectorAll("section").forEach(s=>s.classList.remove("active"));
+      document.getElementById(btn.dataset.tab).classList.add("active");
+    }
+  })
+}
