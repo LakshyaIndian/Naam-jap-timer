@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Harivansh Mala</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+<section id="timerSection" class="active">
+<h1 id="timerDisplay">08:00</h1>
+<div class="controls">
+<button id="startBtn">Start</button>
+<button id="pauseBtn">Pause</button>
+<button id="resetBtn">Reset</button>
+</div>
+<h2 id="todayCount">0 malas today</h2>
+</section>
+<section id="historySection"></section>
+<section id="themesSection"></section>
+<section id="settingsSection"></section>
+<nav>
+<button data-tab="timerSection">Timer</button>
+<button data-tab="historySection">History</button>
+<button data-tab="themesSection">Themes</button>
+<button data-tab="settingsSection">Settings</button>
+</nav>
+</div>
+<div id="modal" class="hidden">
+<div class="modal-content">
+<p>Count this as 1 mala?</p>
+<button id="yesBtn">Yes</button>
+<button id="noBtn">No</button>
+</div>
+</div>
+<script src="js/storage.js"></script>
+<script src="js/timer.js"></script>
+<script src="js/themes.js"></script>
+<script src="js/history.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
