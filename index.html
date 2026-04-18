@@ -1,55 +1,130 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Harivansh Mala</title>
-<link rel="manifest" href="manifest.json" />
-<link rel="stylesheet" href="css/style.css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#6e213b" />
+  <meta name="description" content="Harivansh Mala — a calm offline PWA for 8-minute naam jap timer and daily mala history." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Harivansh Mala" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="css/style.css" />
+  <title>Harivansh Mala</title>
 </head>
-<body>
-<div id="app">
-<section id="timerSection" class="active">
+<body data-theme="deep-maroon-devotional">
+  <div class="background-pattern" aria-hidden="true"></div>
+  <div class="app-shell">
+    <header class="topbar glass-card">
+      <div>
+        <p class="eyebrow">राधावल्लभ श्री हरिवंश</p>
+        <h1>Harivansh Mala</h1>
+      </div>
+      <button id="install-button" class="button secondary" hidden>Install</button>
+    </header>
 
-<div class="timer-ring">
-  <div class="ring"></div>
-  <h1 id="timerDisplay">08:00</h1>
-</div>
+    <main class="main-content">
+      <section id="screen-home" class="screen active" aria-labelledby="home-heading">
+        <div class="hero glass-card">
+          <div class="hero-copy">
+            <p class="eyebrow">8-minute chanting cycle</p>
+            <h2 id="home-heading">Naam Jap Timer</h2>
+            <p class="subtle">A calm, offline mala companion that remembers your daily jap and keeps your history safely on your device.</p>
+          </div>
+          <div class="timer-card">
+            <div class="timer-ring-wrap">
+              <svg class="timer-ring" viewBox="0 0 160 160" aria-hidden="true">
+                <circle class="ring-bg" cx="80" cy="80" r="68"></circle>
+                <circle class="ring-progress" id="progress-ring" cx="80" cy="80" r="68"></circle>
+              </svg>
+              <div class="timer-center">
+                <div class="timer-status" id="timer-status">Ready</div>
+                <div class="timer-display" id="timer-display" aria-live="polite">08:00</div>
+                <div class="timer-subtext" id="timer-subtext">Tap start when you begin.</div>
+              </div>
+            </div>
+            <div class="controls">
+              <button id="start-button" class="button primary">Start</button>
+              <button id="pause-button" class="button secondary" disabled>Pause</button>
+              <button id="resume-button" class="button secondary hidden">Resume</button>
+              <button id="reset-button" class="button secondary">Reset</button>
+            </div>
+          </div>
+        </div>
+        <div class="stats-grid">
+          <article class="stat-card glass-card spotlight">
+            <div class="stat-label">Today’s Mala</div>
+            <div class="stat-value" id="today-count">0</div>
+            <div class="stat-help" id="today-label">—</div>
+          </article>
+          <article class="stat-card glass-card"><div class="stat-label">This Month</div><div class="stat-value" id="month-total">0</div></article>
+          <article class="stat-card glass-card"><div class="stat-label">This Year</div><div class="stat-value" id="year-total">0</div></article>
+          <article class="stat-card glass-card" id="home-all-time-card"><div class="stat-label">All Time</div><div class="stat-value" id="all-time-total">0</div></article>
+        </div>
+      </section>
 
-<div class="controls">
-<button id="startBtn">Start</button>
-<button id="pauseBtn">Pause</button>
-<button id="resetBtn">Reset</button>
-</div>
+      <section id="screen-history" class="screen" aria-labelledby="history-heading">
+        <div class="glass-card section-card">
+          <div class="section-header">
+            <div><p class="eyebrow">Your saved record</p><h2 id="history-heading">Daily History</h2></div>
+            <button id="export-button" class="button secondary">Export</button>
+          </div>
+          <div class="history-summary" id="history-summary"></div>
+          <div id="history-empty" class="empty-state" hidden><p>No mala history yet. Complete your first 8-minute cycle and count it to begin.</p></div>
+          <div class="history-groups" id="history-groups"></div>
+        </div>
+      </section>
 
-<h2 id="todayCount">0 malas today</h2>
-</section>
+      <section id="screen-themes" class="screen" aria-labelledby="themes-heading">
+        <div class="glass-card section-card">
+          <div class="section-header"><div><p class="eyebrow">20 devotional palettes</p><h2 id="themes-heading">Themes</h2></div></div>
+          <div class="theme-grid" id="theme-grid"></div>
+        </div>
+      </section>
 
-<section id="historySection"></section>
-<section id="themesSection"></section>
-<section id="settingsSection"></section>
+      <section id="screen-settings" class="screen" aria-labelledby="settings-heading">
+        <div class="glass-card section-card">
+          <div class="section-header"><div><p class="eyebrow">Behavior and backup</p><h2 id="settings-heading">Settings</h2></div></div>
+          <div class="settings-list">
+            <label class="setting-row"><span>Sound on completion</span><input type="checkbox" id="setting-sound" /></label>
+            <label class="setting-row"><span>Vibration on completion</span><input type="checkbox" id="setting-vibration" /></label>
+            <label class="setting-row"><span>Confirm before reset</span><input type="checkbox" id="setting-confirm-reset" /></label>
+            <label class="setting-row"><span>Show stats on home</span><input type="checkbox" id="setting-show-stats-home" /></label>
+            <label class="setting-row"><span>Keep screen awake during timer</span><input type="checkbox" id="setting-wake-lock" /></label>
+          </div>
+          <div class="settings-actions">
+            <button id="import-button" class="button secondary">Import Backup</button>
+            <input type="file" id="import-file" accept="application/json" hidden />
+            <button id="reset-today-button" class="button secondary danger">Reset Today</button>
+            <button id="reset-all-button" class="button secondary danger">Reset All Data</button>
+          </div>
+          <div class="settings-message" id="settings-message" aria-live="polite"></div>
+        </div>
+      </section>
+    </main>
 
-<nav>
-<button data-tab="timerSection">Timer</button>
-<button data-tab="historySection">History</button>
-<button data-tab="themesSection">Themes</button>
-<button data-tab="settingsSection">Settings</button>
-</nav>
-</div>
+    <nav class="tabbar glass-card" aria-label="Primary navigation">
+      <button class="tab-button active" data-screen="home">Timer</button>
+      <button class="tab-button" data-screen="history">History</button>
+      <button class="tab-button" data-screen="themes">Themes</button>
+      <button class="tab-button" data-screen="settings">Settings</button>
+    </nav>
+  </div>
 
-<div id="modal" class="hidden">
-<div class="modal-content">
-<p>Count this as 1 mala?</p>
-<button id="yesBtn">Yes</button>
-<button id="noBtn">No</button>
-</div>
-</div>
+  <dialog id="completion-dialog" class="completion-dialog">
+    <form method="dialog" class="dialog-card glass-card">
+      <p class="eyebrow">Timer completed</p>
+      <h2>8 minutes completed.</h2>
+      <p>Count this as 1 mala?</p>
+      <div class="dialog-actions">
+        <button id="count-no-button" class="button secondary" value="no">No</button>
+        <button id="count-yes-button" class="button primary" value="yes">Yes, count 1 mala</button>
+      </div>
+    </form>
+  </dialog>
 
-<script src="js/storage.js"></script>
-<script src="js/timer.js"></script>
-<script src="js/themes.js"></script>
-<script src="js/history.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

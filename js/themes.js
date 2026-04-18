@@ -1,24 +1,9 @@
-const themes=[
-  {name:"Maroon",bg:"#3b0d0d",text:"#fff",card:"#1b1b22"},
-  {name:"Lotus",bg:"#ffe4ec",text:"#000",card:"#ffffff"},
-  {name:"Temple",bg:"#ffffff",text:"#000",card:"#f5f5f5"}
-];
-
-function applyTheme(t){
-  document.documentElement.style.setProperty("--bg",t.bg);
-  document.documentElement.style.setProperty("--text",t.text);
-  document.documentElement.style.setProperty("--card",t.card);
-  localStorage.setItem("theme",JSON.stringify(t));
+export const THEMES = [{"id": "deep-maroon-devotional", "name": "Deep Maroon Devotional", "colors": ["#2b0f1a", "#f2b36f", "#43172a"]}, {"id": "sandal-gold", "name": "Sandal Gold", "colors": ["#4d3920", "#e5c476", "#6f5530"]}, {"id": "lotus-pink", "name": "Lotus Pink", "colors": ["#441f32", "#f1a7c4", "#632f49"]}, {"id": "vrindavan-green", "name": "Vrindavan Green", "colors": ["#183126", "#9fd5a9", "#244b3b"]}, {"id": "midnight-temple-blue", "name": "Midnight Temple Blue", "colors": ["#111f38", "#90b7ff", "#183052"]}, {"id": "ivory-saffron", "name": "Ivory Saffron", "colors": ["#54452b", "#efba52", "#715a31"]}, {"id": "rose-dusk", "name": "Rose Dusk", "colors": ["#40252b", "#e8a3a3", "#613740"]}, {"id": "peacock-teal", "name": "Peacock Teal", "colors": ["#10363a", "#78d1c7", "#17535a"]}, {"id": "silver-moon", "name": "Silver Moon", "colors": ["#353842", "#c8d0e6", "#4b5061"]}, {"id": "warm-cream", "name": "Warm Cream", "colors": ["#4c4338", "#dbbb8a", "#685a49"]}, {"id": "sacred-ash", "name": "Sacred Ash", "colors": ["#2f3135", "#c0c4c8", "#45484d"]}, {"id": "tulsi-green", "name": "Tulsi Green", "colors": ["#1f3622", "#9bcb8b", "#315336"]}, {"id": "sunset-orange", "name": "Sunset Orange", "colors": ["#4a271b", "#f0a16b", "#693728"]}, {"id": "rudraksha-brown", "name": "Rudraksha Brown", "colors": ["#352015", "#c99162", "#523124"]}, {"id": "ganga-blue", "name": "Ganga Blue", "colors": ["#143043", "#85c3e8", "#1d4a68"]}, {"id": "champak-yellow", "name": "Champak Yellow", "colors": ["#564815", "#f2d35b", "#75601f"]}, {"id": "dusk-purple", "name": "Dusk Purple", "colors": ["#2f2346", "#c0a4ee", "#473465"]}, {"id": "temple-white", "name": "Temple White", "colors": ["#d8d0c7", "#8c6a4d", "#c6baad"]}, {"id": "coral-dawn", "name": "Coral Dawn", "colors": ["#4b2b2b", "#f0a08f", "#6b3f3e"]}, {"id": "forest-sage", "name": "Forest Sage", "colors": ["#253127", "#b8c8a0", "#39493c"]}];
+export function isValidTheme(id){ return THEMES.some((theme)=>theme.id===id); }
+export function applyTheme(id){
+  document.body.setAttribute("data-theme", id);
+  const themeColor = getComputedStyle(document.body).getPropertyValue("--bg").trim() || "#6e213b";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", themeColor);
 }
-
-function loadTheme(){
-  try{
-    const t=JSON.parse(localStorage.getItem("theme"));
-    if(t) applyTheme(t);
-  }catch{}
-}
-
-function renderThemes(){
-  const el=document.getElementById("themesSection");
-  el.innerHTML=themes.map((t,i)=>`<button onclick='applyTheme(themes[${i}])'>${t.name}</button>`).join("");
-}
+export function getThemeMeta(id){ return THEMES.find((theme)=>theme.id===id) || THEMES[0]; }

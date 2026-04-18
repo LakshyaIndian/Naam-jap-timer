@@ -1,89 +1,12 @@
-const TIMER_DURATION = 8 * 60 * 1000;
-
-let timerState = {
-  startTime: null,
-  elapsedBeforePause: 0,
-  running: false,
-  startDate: null
-};
-
-function startTimer() {
-  if (timerState.running) return;
-
-  if (!timerState.startDate) {
-    timerState.startDate = new Date().toISOString().split("T")[0];
-  }
-
-  timerState.startTime = Date.now();
-  timerState.running = true;
-  persistTimer();
-}
-
-function pauseTimer() {
-  if (!timerState.running) return;
-
-  timerState.elapsedBeforePause += Date.now() - timerState.startTime;
-  timerState.running = false;
-  persistTimer();
-}
-
-function resetTimer() {
-  timerState = { startTime: null, elapsedBeforePause: 0, running: false, startDate: null };
-  persistTimer();
-  updateDisplay(TIMER_DURATION);
-  updateRing(0);
-}
-
-function getElapsed() {
-  if (!timerState.startTime) return timerState.elapsedBeforePause;
-
-  if (timerState.running) {
-    return timerState.elapsedBeforePause + (Date.now() - timerState.startTime);
-  }
-
-  return timerState.elapsedBeforePause;
-}
-
-function getRemaining() {
-  return Math.max(TIMER_DURATION - getElapsed(), 0);
-}
-
-function tick() {
-  if (!timerState.running) return;
-
-  let remaining = getRemaining();
-  let progress = getElapsed() / TIMER_DURATION;
-
-  updateDisplay(remaining);
-  updateRing(progress);
-
-  if (remaining <= 0) {
-    timerState.running = false;
-    persistTimer();
-
-    // midnight-safe completion
-    const today = new Date().toISOString().split("T")[0];
-    const sameDay = timerState.startDate === today;
-
-    onTimerComplete(sameDay);
-  }
-}
-
-setInterval(tick, 1000);
-
-function persistTimer() {
-  try{
-    localStorage.setItem("timer_state", JSON.stringify(timerState));
-  }catch{}
-}
-
-function restoreTimer() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem("timer_state"));
-    if(parsed && typeof parsed === 'object'){
-      timerState = parsed;
-    }
-  } catch {
-    timerState = { startTime:null, elapsedBeforePause:0, running:false, startDate:null };
-  }
+export const TIMER_DURATION_MS = 8 * 60 * 1000;
+export function createTimerApi(state){
+  function setIdle(){ state.timer.phase="idle"; state.timer.startedAt=null; state.timer.endAt=null; state.timer.pausedRemainingMs=null; state.timer.completionHandled=false; state.timer.completionDecisionMade=false; }
+  function start(){ const now=Date.now(); state.timer.phase="running"; state.timer.startedAt=now; state.timer.endAt=now + TIMER_DURATION_MS; state.timer.pausedRemainingMs=null; state.timer.completionHandled=false; state.timer.completionDecisionMade=false; }
+  function pause(){ if (state.timer.phase!=="running" || !Number.isFinite(state.timer.endAt)) return; state.timer.pausedRemainingMs=Math.max(0,state.timer.endAt-Date.now()); state.timer.phase="paused"; state.timer.endAt=null; }
+  function resume(){ if (state.timer.phase!=="paused" || !Number.isFinite(state.timer.pausedRemainingMs)) return; const now=Date.now(); state.timer.phase="running"; state.timer.startedAt=now; state.timer.endAt=now + state.timer.pausedRemainingMs; state.timer.pausedRemainingMs=null; }
+  function reset(){ setIdle(); }
+  function getRemainingMs(now=Date.now()){ if (state.timer.phase==="running" && Number.isFinite(state.timer.endAt)) return Math.max(0,state.timer.endAt-now); if (state.timer.phase==="paused" && Number.isFinite(state.timer.pausedRemainingMs)) return Math.max(0,state.timer.pausedRemainingMs); return TIMER_DURATION_MS; }
+  function getProgress(now=Date.now()){ const remaining=getRemainingMs(now); return Math.min(1,Math.max(0,(TIMER_DURATION_MS-remaining)/TIMER_DURATION_MS)); }
+  function recoverCompletion(now=Date.now()){ if (state.timer.phase==="running" && Number.isFinite(state.timer.endAt) && now>=state.timer.endAt){ state.timer.phase="completed-awaiting-decision"; state.timer.completionHandled=false; state.timer.completionDecisionMade=false; state.timer.pausedRemainingMs=0; return true; } return false; }
+  return { start,pause,resume,reset,getRemainingMs,getProgress,recoverCompletion,setIdle };
 }
