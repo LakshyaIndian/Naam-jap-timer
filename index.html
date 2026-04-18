@@ -10,17 +10,25 @@
 <body>
 <div id="app">
 <section id="timerSection" class="active">
-<h1 id="timerDisplay">08:00</h1>
+
+<div class="timer-ring">
+  <div class="ring"></div>
+  <h1 id="timerDisplay">08:00</h1>
+</div>
+
 <div class="controls">
 <button id="startBtn">Start</button>
 <button id="pauseBtn">Pause</button>
 <button id="resetBtn">Reset</button>
 </div>
+
 <h2 id="todayCount">0 malas today</h2>
 </section>
+
 <section id="historySection"></section>
 <section id="themesSection"></section>
 <section id="settingsSection"></section>
+
 <nav>
 <button data-tab="timerSection">Timer</button>
 <button data-tab="historySection">History</button>
@@ -28,6 +36,7 @@
 <button data-tab="settingsSection">Settings</button>
 </nav>
 </div>
+
 <div id="modal" class="hidden">
 <div class="modal-content">
 <p>Count this as 1 mala?</p>
@@ -35,6 +44,7 @@
 <button id="noBtn">No</button>
 </div>
 </div>
+
 <script src="js/storage.js"></script>
 <script src="js/timer.js"></script>
 <script src="js/themes.js"></script>
