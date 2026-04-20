@@ -33,6 +33,7 @@ let slideshowTransitionBusy = false;
 let serviceWorkerReloaded = false;
 let nextSlidePreloader = null;
 let preloadedSlideId = null;
+let slideshowPersistenceAvailable = true;
 
 const persist = (message) => {
   const ok = saveState(state);
@@ -78,16 +79,17 @@ async function hydrateSlideshowImages() {
     }
     const dbImages = await loadSlideshowImages();
     const dbMap = new Map(dbImages.map((image) => [image.id, image]));
-    let metadata = state.slideshow.images.map((image) => ({ id: image.id, name: image.name }));
+    let metadata = state.slideshow.images.map((image) => ({ id: image.id, name: image.name, dataUrl: image.dataUrl }));
     if (!metadata.length && dbImages.length) {
       metadata = dbImages.map((image) => ({ id: image.id, name: image.name }));
     }
     state.slideshow.images = metadata
       .map((meta) => {
+        if (typeof meta.dataUrl === "string") return { id: meta.id, name: meta.name, dataUrl: meta.dataUrl };
         const full = dbMap.get(meta.id);
         return full ? { id: full.id, name: meta.name || full.name, dataUrl: full.dataUrl } : null;
       })
-      .filter(Boolean)
+      .filter((image) => image && typeof image.dataUrl === "string")
       .slice(0, MAX_SLIDESHOW_IMAGES);
     if (!state.slideshow.images.length && dbImages.length) {
       state.slideshow.images = dbImages.slice(0, MAX_SLIDESHOW_IMAGES).map((image) => ({ id: image.id, name: image.name, dataUrl: image.dataUrl }));
@@ -97,11 +99,15 @@ async function hydrateSlideshowImages() {
       state.slideshow.order = state.slideshow.images.map((_, index) => index);
       state.slideshow.currentIndex = 0;
     }
+    slideshowPersistenceAvailable = true;
     persist();
   } catch {
-    ui.setSettingsMessage("Slideshow image storage is not available right now.");
-    state.slideshow.images = [];
-    state.slideshow.order = [];
+    slideshowPersistenceAvailable = false;
+    if (!embeddedImages.length) {
+      ui.setSettingsMessage("Slideshow image storage is limited in this browser. Images will work only in this session.");
+    }
+    state.slideshow.images = embeddedImages.slice(0, MAX_SLIDESHOW_IMAGES);
+    state.slideshow.order = state.slideshow.images.map((_, index) => index);
     state.slideshow.currentIndex = 0;
     state.slideshow.running = false;
   }
@@ -121,7 +127,7 @@ function getOrderedSlideshowImages() {
   const { images, order } = state.slideshow;
   if (!images.length) return [];
   if (!order.length) return images;
-  return order.map((index) => images[index]).filter(Boolean);
+  return order.map((index) => images[index]).filter((image) => image && typeof image.dataUrl === "string");
 }
 
 function getNextOrderedSlide() {
@@ -145,9 +151,7 @@ async function preloadUpcomingSlide() {
   img.src = nextImage.dataUrl;
   try {
     if (typeof img.decode === "function") await img.decode();
-  } catch {
-    // ignore decode failures and still keep the browser-level preload work
-  }
+  } catch {}
   nextSlidePreloader = img;
   preloadedSlideId = nextImage.id;
 }
@@ -228,12 +232,9 @@ function refreshLoopForPhase() {
 function transitionToSlide(nextImage) {
   const current = ui.elements.slideshowImageCurrent;
   const upcoming = ui.elements.slideshowImageNext;
-  if (!nextImage || slideshowTransitionBusy) return;
+  if (!nextImage || slideshowTransitionBusy || !nextImage.dataUrl) return;
   slideshowTransitionBusy = true;
   upcoming.src = nextImage.dataUrl;
-  if (preloadedSlideId === nextImage.id && nextSlidePreloader) {
-    // browser cache is already warm; assigning src uses the preloaded asset path
-  }
   upcoming.classList.add("active");
   window.setTimeout(() => {
     current.src = nextImage.dataUrl;
@@ -300,7 +301,9 @@ async function handleDeleteSlideshowImage(imageId) {
   const orderedBeforeDelete = getOrderedSlideshowImages();
   const currentImageId = orderedBeforeDelete[state.slideshow.currentIndex]?.id ?? null;
   state.slideshow.images = state.slideshow.images.filter((image) => image.id !== imageId);
-  try { await deleteSlideshowImageRecord(imageId); } catch { ui.setSettingsMessage("Could not delete image right now."); }
+  if (slideshowPersistenceAvailable) {
+    try { await deleteSlideshowImageRecord(imageId); } catch { ui.setSettingsMessage("Could not delete image from device storage right now."); }
+  }
   if (!state.slideshow.images.length) {
     state.slideshow.order = [];
     state.slideshow.currentIndex = 0;
@@ -332,9 +335,6 @@ async function handleSlideshowFiles(files) {
     return;
   }
   const filesToRead = validFiles.slice(0, remainingSlots);
-  if (validFiles.length > remainingSlots) {
-    ui.setSettingsMessage(`Only ${remainingSlots} more image${remainingSlots === 1 ? "" : "s"} can be added. Limit is ${MAX_SLIDESHOW_IMAGES}.`);
-  }
   const previousSlideshow = JSON.parse(JSON.stringify(state.slideshow));
   const readers = filesToRead.map((file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -344,7 +344,6 @@ async function handleSlideshowFiles(files) {
   }));
   try {
     const images = await Promise.all(readers);
-    await addSlideshowImages(images);
     state.slideshow.images.push(...images);
     state.slideshow.images = state.slideshow.images.slice(0, MAX_SLIDESHOW_IMAGES);
     state.slideshow.order = state.slideshow.images.map((_, index) => index);
@@ -353,15 +352,26 @@ async function handleSlideshowFiles(files) {
     stopSlideshowLoop();
     preloadedSlideId = null;
     nextSlidePreloader = null;
+    syncUi({ forceStatic: true });
+    preloadUpcomingSlide();
+
+    if (slideshowPersistenceAvailable) {
+      try {
+        await addSlideshowImages(images);
+      } catch {
+        slideshowPersistenceAvailable = false;
+        ui.setSettingsMessage("Images were added for this session, but device storage is unavailable, so they may not persist after reload.");
+      }
+    }
+
     if (!persist()) {
       state.slideshow = previousSlideshow;
-      await saveSlideshowImages(previousSlideshow.images || []);
       syncUi({ forceStatic: true });
       throw new Error("Images metadata could not be saved locally. Try again.");
     }
-    syncUi({ forceStatic: true });
+
     if (validFiles.length > remainingSlots) ui.setSettingsMessage(`Added ${images.length} image${images.length === 1 ? "" : "s"}. Limit is ${MAX_SLIDESHOW_IMAGES}.`);
-    else ui.setSettingsMessage(`${images.length} image${images.length === 1 ? "" : "s"} added.`);
+    else if (slideshowPersistenceAvailable) ui.setSettingsMessage(`${images.length} image${images.length === 1 ? "" : "s"} added.`);
   } catch (error) {
     state.slideshow = previousSlideshow;
     syncUi({ forceStatic: true });
@@ -489,7 +499,9 @@ function bindEvents() {
     if (!window.confirm("Clear all slideshow images?")) return;
     state.slideshow.images = []; state.slideshow.order = []; state.slideshow.currentIndex = 0; state.slideshow.running = false; stopSlideshowLoop();
     preloadedSlideId = null; nextSlidePreloader = null;
-    try { await clearSlideshowImages(); } catch { ui.setSettingsMessage("Could not clear slideshow storage completely."); }
+    if (slideshowPersistenceAvailable) {
+      try { await clearSlideshowImages(); } catch { ui.setSettingsMessage("Could not clear slideshow storage completely."); }
+    }
     commitState({ forceStatic: true });
   });
   document.getElementById("export-button").addEventListener("click", () => {
@@ -511,7 +523,9 @@ function bindEvents() {
     if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) return;
     resetStoredState(); Object.assign(state, loadState()); ensureSlideshowState(); timer.setIdle(); stopSlideshowLoop();
     preloadedSlideId = null; nextSlidePreloader = null;
-    try { await clearSlideshowImages(); } catch {}
+    if (slideshowPersistenceAvailable) {
+      try { await clearSlideshowImages(); } catch {}
+    }
     await releaseWakeLock(); applySavedTheme(); hasRenderedThemeGrid = false; ui.setSettingsMessage("All data has been reset."); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true, forceThemes: true });
   });
   document.getElementById("setting-sound").addEventListener("change", (event) => { state.settings.sound = event.target.checked; persist(); });
