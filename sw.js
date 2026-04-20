@@ -1,5 +1,5 @@
-const CACHE_NAME = "harivansh-mala-cache-v2";
-const ASSETS = [
+const CACHE_NAME = "harivansh-mala-cache-v3";
+const APP_SHELL_ASSETS = [
   "./",
   "./index.html",
   "./css/style.css",
@@ -18,7 +18,7 @@ const ASSETS = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
+      .then((cache) => cache.addAll(APP_SHELL_ASSETS))
       .then(() => self.skipWaiting())
   );
 });
@@ -37,43 +37,50 @@ self.addEventListener("message", (event) => {
   }
 });
 
+async function networkFirst(request, cacheKey = request) {
+  try {
+    const response = await fetch(request, { cache: "no-store" });
+    if (response && response.ok) {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(cacheKey, copy)).catch(() => {});
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(cacheKey);
+    if (cached) return cached;
+    throw new Error("Network and cache both unavailable.");
+  }
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response && response.ok) {
+    const copy = response.clone();
+    caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+  }
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
-  const requestUrl = new URL(event.request.url);
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+
   const isNavigation = event.request.mode === "navigate";
-  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const isAppCode = url.pathname.endsWith(".js") || url.pathname.endsWith(".css") || url.pathname.endsWith(".html") || url.pathname.endsWith("/Naam-jap-timer/") || url.pathname.endsWith("/Naam-jap-timer");
 
   if (isNavigation) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy)).catch(() => {});
-          return response;
-        })
-        .catch(() => caches.match("./index.html"))
-    );
+    event.respondWith(networkFirst(event.request, "./index.html"));
     return;
   }
 
-  if (!isSameOrigin) {
+  if (isAppCode) {
+    event.respondWith(networkFirst(event.request));
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
-          }
-          return response;
-        })
-        .catch(() => cached);
-
-      return cached || networkFetch;
-    })
-  );
+  event.respondWith(cacheFirst(event.request));
 });
