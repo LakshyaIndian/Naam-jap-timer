@@ -31,6 +31,8 @@ let hasRenderedThemeGrid = false;
 let slideshowTimeoutId = null;
 let slideshowTransitionBusy = false;
 let serviceWorkerReloaded = false;
+let nextSlidePreloader = null;
+let preloadedSlideId = null;
 
 const persist = (message) => {
   const ok = saveState(state);
@@ -122,6 +124,34 @@ function getOrderedSlideshowImages() {
   return order.map((index) => images[index]).filter(Boolean);
 }
 
+function getNextOrderedSlide() {
+  const orderedImages = getOrderedSlideshowImages();
+  if (!orderedImages.length) return null;
+  if (orderedImages.length === 1) return orderedImages[0];
+  const nextIndex = (state.slideshow.currentIndex + 1) % orderedImages.length;
+  return orderedImages[nextIndex] || null;
+}
+
+async function preloadUpcomingSlide() {
+  const nextImage = getNextOrderedSlide();
+  if (!nextImage || !nextImage.dataUrl) {
+    nextSlidePreloader = null;
+    preloadedSlideId = null;
+    return;
+  }
+  if (preloadedSlideId === nextImage.id) return;
+  const img = new Image();
+  img.decoding = "async";
+  img.src = nextImage.dataUrl;
+  try {
+    if (typeof img.decode === "function") await img.decode();
+  } catch {
+    // ignore decode failures and still keep the browser-level preload work
+  }
+  nextSlidePreloader = img;
+  preloadedSlideId = nextImage.id;
+}
+
 function shuffleIndexes(length) {
   const indexes = Array.from({ length }, (_, index) => index);
   for (let i = indexes.length - 1; i > 0; i -= 1) {
@@ -201,6 +231,9 @@ function transitionToSlide(nextImage) {
   if (!nextImage || slideshowTransitionBusy) return;
   slideshowTransitionBusy = true;
   upcoming.src = nextImage.dataUrl;
+  if (preloadedSlideId === nextImage.id && nextSlidePreloader) {
+    // browser cache is already warm; assigning src uses the preloaded asset path
+  }
   upcoming.classList.add("active");
   window.setTimeout(() => {
     current.src = nextImage.dataUrl;
@@ -208,12 +241,16 @@ function transitionToSlide(nextImage) {
     upcoming.classList.remove("active");
     upcoming.removeAttribute("src");
     slideshowTransitionBusy = false;
+    preloadedSlideId = null;
+    nextSlidePreloader = null;
+    preloadUpcomingSlide();
   }, 380);
 }
 
 function scheduleNextSlide() {
   stopSlideshowLoop();
   if (!state.slideshow.running || state.slideshow.images.length <= 1) return;
+  preloadUpcomingSlide();
   slideshowTimeoutId = window.setTimeout(() => {
     advanceSlideshow();
     scheduleNextSlide();
@@ -231,12 +268,15 @@ function startSlideshow() {
   state.slideshow.running = true;
   state.slideshow.lastStartedAt = Date.now();
   commitState({ forceStatic: true });
+  preloadUpcomingSlide();
   scheduleNextSlide();
 }
 
 function stopSlideshow() {
   state.slideshow.running = false;
   stopSlideshowLoop();
+  preloadedSlideId = null;
+  nextSlidePreloader = null;
   commitState({ forceStatic: true });
 }
 
@@ -245,6 +285,7 @@ function advanceSlideshow() {
   if (!orderedImages.length) return stopSlideshow();
   if (orderedImages.length === 1) {
     state.slideshow.currentIndex = 0;
+    preloadUpcomingSlide();
     return commitState({ forceStatic: true });
   }
   state.slideshow.currentIndex = (state.slideshow.currentIndex + 1) % orderedImages.length;
@@ -265,12 +306,15 @@ async function handleDeleteSlideshowImage(imageId) {
     state.slideshow.currentIndex = 0;
     state.slideshow.running = false;
     stopSlideshowLoop();
+    preloadedSlideId = null;
+    nextSlidePreloader = null;
     return commitState({ forceStatic: true });
   }
   state.slideshow.order = shuffleIndexes(state.slideshow.images.length);
   const orderedAfterDelete = getOrderedSlideshowImages();
   const preservedIndex = orderedAfterDelete.findIndex((image) => image.id === currentImageId && image.id !== imageId);
   state.slideshow.currentIndex = preservedIndex >= 0 ? preservedIndex : 0;
+  preloadUpcomingSlide();
   if (state.slideshow.running) scheduleNextSlide();
   commitState({ forceStatic: true });
 }
@@ -307,6 +351,8 @@ async function handleSlideshowFiles(files) {
     state.slideshow.currentIndex = 0;
     state.slideshow.running = false;
     stopSlideshowLoop();
+    preloadedSlideId = null;
+    nextSlidePreloader = null;
     if (!persist()) {
       state.slideshow = previousSlideshow;
       await saveSlideshowImages(previousSlideshow.images || []);
@@ -442,6 +488,7 @@ function bindEvents() {
     if (!state.slideshow.images.length) return;
     if (!window.confirm("Clear all slideshow images?")) return;
     state.slideshow.images = []; state.slideshow.order = []; state.slideshow.currentIndex = 0; state.slideshow.running = false; stopSlideshowLoop();
+    preloadedSlideId = null; nextSlidePreloader = null;
     try { await clearSlideshowImages(); } catch { ui.setSettingsMessage("Could not clear slideshow storage completely."); }
     commitState({ forceStatic: true });
   });
@@ -463,6 +510,7 @@ function bindEvents() {
   document.getElementById("reset-all-button").addEventListener("click", async () => {
     if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) return;
     resetStoredState(); Object.assign(state, loadState()); ensureSlideshowState(); timer.setIdle(); stopSlideshowLoop();
+    preloadedSlideId = null; nextSlidePreloader = null;
     try { await clearSlideshowImages(); } catch {}
     await releaseWakeLock(); applySavedTheme(); hasRenderedThemeGrid = false; ui.setSettingsMessage("All data has been reset."); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true, forceThemes: true });
   });
@@ -507,6 +555,7 @@ async function init() {
   bindEvents();
   registerServiceWorker();
   await hydrateSlideshowImages();
+  await preloadUpcomingSlide();
   syncUi({ forceTimer: true, forceStatic: true, forceThemes: true });
   refreshLoopForPhase();
   if (state.slideshow.running) scheduleNextSlide();
