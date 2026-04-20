@@ -164,16 +164,19 @@ export function createUi() {
   }
 
   function renderSlideshow(slideshow, onDelete) {
-    const { images, order, currentIndex, running } = slideshow;
-    const orderedImages = order.length ? order.map((index) => images[index]).filter(Boolean) : images;
-    const currentImage = orderedImages[currentIndex] || orderedImages[0] || null;
+    const validImages = (Array.isArray(slideshow.images) ? slideshow.images : []).filter((image) => image && typeof image.dataUrl === "string" && image.dataUrl.length > 0);
+    const validOrder = (Array.isArray(slideshow.order) ? slideshow.order : []).filter((index) => Number.isInteger(index) && index >= 0 && index < validImages.length);
+    const orderedImages = validOrder.length ? validOrder.map((index) => validImages[index]).filter(Boolean) : validImages;
+    const safeIndex = Math.min(Math.max(Number.isInteger(slideshow.currentIndex) ? slideshow.currentIndex : 0, 0), Math.max(orderedImages.length - 1, 0));
+    const currentImage = orderedImages[safeIndex] || orderedImages[0] || null;
+    const hasRenderableImages = orderedImages.length > 0;
 
-    elements.slideshowCounter.textContent = `${images.length} image${images.length === 1 ? "" : "s"}`;
-    elements.slideshowStatus.textContent = running ? "Running in random order" : "Stopped";
-    elements.slideshowEmpty.hidden = images.length > 0;
-    elements.slideshowStartButton.disabled = images.length === 0;
-    elements.slideshowStopButton.disabled = !running;
-    elements.slideshowClearButton.disabled = images.length === 0;
+    elements.slideshowCounter.textContent = `${validImages.length} image${validImages.length === 1 ? "" : "s"}`;
+    elements.slideshowStatus.textContent = slideshow.running && hasRenderableImages ? "Running in random order" : "Stopped";
+    elements.slideshowEmpty.hidden = hasRenderableImages;
+    elements.slideshowStartButton.disabled = !hasRenderableImages;
+    elements.slideshowStopButton.disabled = !slideshow.running;
+    elements.slideshowClearButton.disabled = validImages.length === 0;
 
     if (currentImage) {
       if (elements.slideshowImageCurrent.src !== currentImage.dataUrl) {
@@ -183,13 +186,16 @@ export function createUi() {
     } else {
       elements.slideshowImageCurrent.removeAttribute("src");
       elements.slideshowImageCurrent.classList.remove("active");
+      elements.slideshowImageNext.removeAttribute("src");
+      elements.slideshowImageNext.classList.remove("active");
     }
 
     elements.slideshowThumbs.innerHTML = "";
     orderedImages.forEach((image, index) => {
       const thumb = document.createElement("article");
-      thumb.className = `slideshow-thumb${index === currentIndex ? " active" : ""}`;
-      thumb.innerHTML = `<img src="${image.dataUrl}" alt="${image.name}" class="slideshow-thumb-image" /><div class="slideshow-thumb-footer"><div class="slideshow-thumb-name">${image.name}</div></div>`;
+      thumb.className = `slideshow-thumb${index === safeIndex ? " active" : ""}`;
+      thumb.innerHTML = `<img src="${image.dataUrl}" alt="${image.name}" class="slideshow-thumb-image" /><div class="slideshow-thumb-footer"><div class="slideshow-thumb-name"></div></div>`;
+      thumb.querySelector(".slideshow-thumb-name").textContent = image.name;
 
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
