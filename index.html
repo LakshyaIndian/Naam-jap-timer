@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#6e213b" />
-  <meta name="description" content="Harivansh Mala — a calm offline PWA for 8-minute naam jap timer and daily mala history." />
+  <meta name="description" content="Harivansh Mala — a calm offline PWA for 8-minute naam jap timer, slideshow, and daily mala history." />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Harivansh Mala" />
@@ -65,6 +65,34 @@
         </div>
       </section>
 
+      <section id="screen-slideshow" class="screen" aria-labelledby="slideshow-heading">
+        <div class="glass-card section-card">
+          <div class="section-header">
+            <div><p class="eyebrow">Focus visuals</p><h2 id="slideshow-heading">Slideshow</h2></div>
+          </div>
+          <p class="subtle">Add full-quality images, play them in a smooth random order, and keep chanting with the timer running over the experience.</p>
+          <div class="slideshow-actions">
+            <button id="slideshow-add-button" class="button secondary">Add Images</button>
+            <input id="slideshow-file-input" type="file" accept="image/*" multiple hidden />
+            <button id="slideshow-start-button" class="button primary">Start</button>
+            <button id="slideshow-stop-button" class="button secondary">Stop</button>
+            <button id="slideshow-clear-button" class="button secondary danger">Clear All</button>
+          </div>
+          <div class="slideshow-stage-wrap">
+            <div class="slideshow-stage" id="slideshow-stage">
+              <img id="slideshow-image-current" class="slideshow-image active" alt="Current slideshow image" />
+              <img id="slideshow-image-next" class="slideshow-image" alt="Next slideshow image" />
+              <div id="slideshow-empty" class="empty-state slideshow-empty"><p>Add images to begin your slideshow.</p></div>
+            </div>
+          </div>
+          <div class="slideshow-meta">
+            <div id="slideshow-counter" class="stat-help">0 images</div>
+            <div id="slideshow-status" class="stat-help">Stopped</div>
+          </div>
+          <div id="slideshow-thumbs" class="slideshow-thumbs"></div>
+        </div>
+      </section>
+
       <section id="screen-history" class="screen" aria-labelledby="history-heading">
         <div class="glass-card section-card">
           <div class="section-header">
@@ -107,6 +135,7 @@
 
     <nav class="tabbar glass-card" aria-label="Primary navigation">
       <button class="tab-button active" data-screen="home">Timer</button>
+      <button class="tab-button" data-screen="slideshow">Slideshow</button>
       <button class="tab-button" data-screen="history">History</button>
       <button class="tab-button" data-screen="themes">Themes</button>
       <button class="tab-button" data-screen="settings">Settings</button>
