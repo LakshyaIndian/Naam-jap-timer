@@ -31,40 +31,21 @@ function formatTodayLabel() {
 }
 
 function applySavedTheme() {
-  if (!isValidTheme(state.theme)) {
-    state.theme = "deep-maroon-devotional";
-  }
+  if (!isValidTheme(state.theme)) state.theme = "deep-maroon-devotional";
   applyTheme(state.theme);
 }
 
 async function requestWakeLockIfNeeded() {
-  if (!state.settings.wakeLock || state.timer.phase !== "running" || !("wakeLock" in navigator)) {
-    return;
-  }
-
-  try {
-    wakeLock = await navigator.wakeLock.request("screen");
-  } catch {
-    wakeLock = null;
-  }
+  if (!state.settings.wakeLock || state.timer.phase !== "running" || !("wakeLock" in navigator)) return;
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch { wakeLock = null; }
 }
 
 async function releaseWakeLock() {
-  try {
-    if (wakeLock) {
-      await wakeLock.release();
-    }
-  } catch {
-    // no-op
-  } finally {
-    wakeLock = null;
-  }
+  try { if (wakeLock) await wakeLock.release(); } catch {} finally { wakeLock = null; }
 }
 
 function ensureSlideshowState() {
-  if (!state.slideshow || typeof state.slideshow !== "object") {
-    state.slideshow = { images: [], running: false, currentIndex: 0, order: [], intervalMs: 5000, lastStartedAt: null };
-  }
+  if (!state.slideshow || typeof state.slideshow !== "object") state.slideshow = { images: [], running: false, currentIndex: 0, order: [], intervalMs: 5000, lastStartedAt: null };
   state.slideshow.images = Array.isArray(state.slideshow.images) ? state.slideshow.images : [];
   state.slideshow.order = Array.isArray(state.slideshow.order) ? state.slideshow.order : [];
   state.slideshow.currentIndex = Number.isInteger(state.slideshow.currentIndex) ? state.slideshow.currentIndex : 0;
@@ -84,12 +65,8 @@ function ensureFreshState() {
 
 function getOrderedSlideshowImages() {
   const { images, order } = state.slideshow;
-  if (!images.length) {
-    return [];
-  }
-  if (!order.length) {
-    return images;
-  }
+  if (!images.length) return [];
+  if (!order.length) return images;
   return order.map((index) => images[index]).filter(Boolean);
 }
 
@@ -113,11 +90,7 @@ function renderTimerUi(force = false) {
   const phase = state.timer.phase;
   const remainingMs = timer.getRemainingMs(Date.now());
   const displaySecond = Math.ceil(remainingMs / 1000);
-
-  if (!force && phase === timerUiLastPhase && displaySecond === timerUiLastSecond) {
-    return;
-  }
-
+  if (!force && phase === timerUiLastPhase && displaySecond === timerUiLastSecond) return;
   ui.renderTimer({ phase, remainingMs, progress: timer.getProgress(Date.now()) });
   timerUiLastPhase = phase;
   timerUiLastSecond = displaySecond;
@@ -125,17 +98,11 @@ function renderTimerUi(force = false) {
 
 function renderStaticUi(forceThemes = false) {
   const stats = getStats(state.history);
-
-  ui.renderStats({
-    ...stats,
-    todayLabel: formatTodayLabel(),
-    showStatsOnHome: state.settings.showStatsOnHome
-  });
+  ui.renderStats({ ...stats, todayLabel: formatTodayLabel(), showStatsOnHome: state.settings.showStatsOnHome });
   ui.renderHistorySummary(stats);
   ui.renderHistoryGroups(getGroupedHistory(state.history));
   ui.renderSettings(state.settings);
   ui.renderSlideshow(state.slideshow, handleDeleteSlideshowImage);
-
   if (!hasRenderedThemeGrid || forceThemes) {
     ui.renderThemes(state.theme, handleThemeChange);
     hasRenderedThemeGrid = true;
@@ -144,37 +111,20 @@ function renderStaticUi(forceThemes = false) {
 
 function syncUi({ forceTimer = false, forceStatic = false, forceThemes = false } = {}) {
   const { dayChanged, timerJustCompleted } = ensureFreshState();
-
   renderTimerUi(forceTimer || dayChanged || timerJustCompleted);
-
-  if (forceStatic || dayChanged || lastDayKey !== state.currentDate) {
-    renderStaticUi(forceThemes);
-  }
-
-  if (state.timer.phase === "completed-awaiting-decision" && !state.timer.completionHandled) {
-    handleCompletionEffects();
-  }
+  if (forceStatic || dayChanged || lastDayKey !== state.currentDate) renderStaticUi(forceThemes);
+  if (state.timer.phase === "completed-awaiting-decision" && !state.timer.completionHandled) handleCompletionEffects();
 }
 
-function commitState(options = {}) {
-  persist();
-  syncUi(options);
-}
+function commitState(options = {}) { persist(); syncUi(options); }
 
 function startTimerLoop() {
-  if (animationFrameId !== null) {
-    return;
-  }
-
+  if (animationFrameId !== null) return;
   const tick = () => {
     animationFrameId = null;
     syncUi({ forceTimer: false, forceStatic: false });
-
-    if (state.timer.phase === "running") {
-      animationFrameId = requestAnimationFrame(tick);
-    }
+    if (state.timer.phase === "running") animationFrameId = requestAnimationFrame(tick);
   };
-
   animationFrameId = requestAnimationFrame(tick);
 }
 
@@ -186,9 +136,8 @@ function stopTimerLoop() {
 }
 
 function refreshLoopForPhase() {
-  if (state.timer.phase === "running") {
-    startTimerLoop();
-  } else {
+  if (state.timer.phase === "running") startTimerLoop();
+  else {
     stopTimerLoop();
     syncUi({ forceTimer: true, forceStatic: false });
   }
@@ -197,15 +146,10 @@ function refreshLoopForPhase() {
 function transitionToSlide(nextImage) {
   const current = ui.elements.slideshowImageCurrent;
   const upcoming = ui.elements.slideshowImageNext;
-
-  if (!nextImage || slideshowTransitionBusy) {
-    return;
-  }
-
+  if (!nextImage || slideshowTransitionBusy) return;
   slideshowTransitionBusy = true;
   upcoming.src = nextImage.dataUrl;
   upcoming.classList.add("active");
-
   window.setTimeout(() => {
     current.src = nextImage.dataUrl;
     current.classList.add("active");
@@ -217,11 +161,7 @@ function transitionToSlide(nextImage) {
 
 function scheduleNextSlide() {
   stopSlideshowLoop();
-
-  if (!state.slideshow.running || state.slideshow.images.length <= 1) {
-    return;
-  }
-
+  if (!state.slideshow.running || state.slideshow.images.length <= 1) return;
   slideshowTimeoutId = window.setTimeout(() => {
     advanceSlideshow();
     scheduleNextSlide();
@@ -234,7 +174,6 @@ function startSlideshow() {
     ui.setSettingsMessage("Add at least one image before starting the slideshow.");
     return;
   }
-
   state.slideshow.order = shuffleIndexes(state.slideshow.images.length);
   state.slideshow.currentIndex = 0;
   state.slideshow.running = true;
@@ -251,17 +190,11 @@ function stopSlideshow() {
 
 function advanceSlideshow() {
   const orderedImages = getOrderedSlideshowImages();
-  if (!orderedImages.length) {
-    stopSlideshow();
-    return;
-  }
-
+  if (!orderedImages.length) return stopSlideshow();
   if (orderedImages.length === 1) {
     state.slideshow.currentIndex = 0;
-    commitState({ forceStatic: true });
-    return;
+    return commitState({ forceStatic: true });
   }
-
   state.slideshow.currentIndex = (state.slideshow.currentIndex + 1) % orderedImages.length;
   transitionToSlide(orderedImages[state.slideshow.currentIndex]);
   persist();
@@ -270,31 +203,22 @@ function advanceSlideshow() {
 
 function handleDeleteSlideshowImage(imageId) {
   ensureSlideshowState();
-  const originalLength = state.slideshow.images.length;
-  if (!originalLength) {
-    return;
-  }
-
+  if (!state.slideshow.images.length) return;
+  const orderedBeforeDelete = getOrderedSlideshowImages();
+  const currentImageId = orderedBeforeDelete[state.slideshow.currentIndex]?.id ?? null;
   state.slideshow.images = state.slideshow.images.filter((image) => image.id !== imageId);
-
   if (!state.slideshow.images.length) {
     state.slideshow.order = [];
     state.slideshow.currentIndex = 0;
     state.slideshow.running = false;
     stopSlideshowLoop();
-    commitState({ forceStatic: true });
-    return;
+    return commitState({ forceStatic: true });
   }
-
-  const oldOrdered = getOrderedSlideshowImages().map((image) => image.id);
   state.slideshow.order = shuffleIndexes(state.slideshow.images.length);
-  const currentImageId = oldOrdered[state.slideshow.currentIndex];
-  const newOrdered = getOrderedSlideshowImages();
-  const newIndex = newOrdered.findIndex((image) => image.id === currentImageId);
-  state.slideshow.currentIndex = Math.max(0, newIndex);
-  if (originalLength !== state.slideshow.images.length && state.slideshow.running) {
-    scheduleNextSlide();
-  }
+  const orderedAfterDelete = getOrderedSlideshowImages();
+  const preservedIndex = orderedAfterDelete.findIndex((image) => image.id === currentImageId && image.id !== imageId);
+  state.slideshow.currentIndex = preservedIndex >= 0 ? preservedIndex : 0;
+  if (state.slideshow.running) scheduleNextSlide();
   commitState({ forceStatic: true });
 }
 
@@ -304,18 +228,12 @@ async function handleSlideshowFiles(files) {
     ui.setSettingsMessage("No valid image files were selected.");
     return;
   }
-
   const readers = validFiles.map((file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      name: file.name,
-      dataUrl: reader.result
-    });
+    reader.onload = () => resolve({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, name: file.name, dataUrl: reader.result });
     reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
     reader.readAsDataURL(file);
   }));
-
   try {
     const images = await Promise.all(readers);
     state.slideshow.images.push(...images);
@@ -323,9 +241,7 @@ async function handleSlideshowFiles(files) {
     state.slideshow.currentIndex = 0;
     state.slideshow.running = false;
     stopSlideshowLoop();
-    if (!persist()) {
-      throw new Error("Images could not be saved locally. Try fewer or smaller images.");
-    }
+    if (!persist()) throw new Error("Images could not be saved locally. Try fewer or smaller images.");
     syncUi({ forceStatic: true });
     ui.setSettingsMessage(`${images.length} image${images.length === 1 ? "" : "s"} added.`);
   } catch (error) {
@@ -334,10 +250,7 @@ async function handleSlideshowFiles(files) {
 }
 
 function handleThemeChange(id) {
-  if (!isValidTheme(id)) {
-    return;
-  }
-
+  if (!isValidTheme(id)) return;
   state.theme = id;
   applyTheme(state.theme);
   ui.setSettingsMessage(`Theme changed to ${ui.getThemeName(id)}.`);
@@ -345,45 +258,29 @@ function handleThemeChange(id) {
 }
 
 async function playCompletionSound() {
-  if (!state.settings.sound) {
-    return;
-  }
-
+  if (!state.settings.sound) return;
   try {
     audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
-
-    if (audioContext.state === "suspended") {
-      await audioContext.resume();
-    }
-
+    if (audioContext.state === "suspended") await audioContext.resume();
     const now = audioContext.currentTime;
     const oscillator = audioContext.createOscillator();
     const gain = audioContext.createGain();
-
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(528, now);
     oscillator.frequency.exponentialRampToValueAtTime(432, now + 0.65);
-
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.exponentialRampToValueAtTime(0.06, now + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.75);
-
     oscillator.connect(gain);
     gain.connect(audioContext.destination);
     oscillator.start(now);
     oscillator.stop(now + 0.78);
-  } catch {
-    // fail silently on autoplay/audio restrictions
-  }
+  } catch {}
 }
 
 function vibrateCompletion() {
   if (state.settings.vibration && "vibrate" in navigator) {
-    try {
-      navigator.vibrate([120, 60, 120]);
-    } catch {
-      // no-op
-    }
+    try { navigator.vibrate([120, 60, 120]); } catch {}
   }
 }
 
@@ -397,9 +294,7 @@ function handleCompletionEffects() {
 }
 
 async function maybeRestartTimerForSlideshow() {
-  if (ui.getActiveScreen() !== "slideshow") {
-    return;
-  }
+  if (ui.getActiveScreen() !== "slideshow") return;
   ensureDateRollover(state);
   timer.start();
   await requestWakeLockIfNeeded();
@@ -407,18 +302,13 @@ async function maybeRestartTimerForSlideshow() {
 }
 
 async function handleCountDecision(shouldCount) {
-  if (completionInFlight || state.timer.completionDecisionMade) {
-    return;
-  }
-
+  if (completionInFlight || state.timer.completionDecisionMade) return;
   completionInFlight = true;
-
   if (shouldCount) {
     state.timer.completionDecisionMade = true;
     ui.elements.countYesButton.disabled = true;
     incrementTodayCount(state);
   }
-
   timer.setIdle();
   ui.closeCompletionDialog();
   await maybeRestartTimerForSlideshow();
@@ -428,255 +318,91 @@ async function handleCountDecision(shouldCount) {
 }
 
 function bindEvents() {
-  ui.bindNavigation(() => {
-    if (state.slideshow.running) {
-      scheduleNextSlide();
-    }
-  });
+  ui.bindNavigation(() => { if (state.slideshow.running) scheduleNextSlide(); });
 
   ui.elements.startButton.addEventListener("click", async () => {
-    ensureDateRollover(state);
-    timer.start();
-    await requestWakeLockIfNeeded();
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: true });
+    ensureDateRollover(state); timer.start(); await requestWakeLockIfNeeded(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true });
   });
-
   ui.elements.pauseButton.addEventListener("click", async () => {
-    timer.pause();
-    await releaseWakeLock();
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: false });
+    timer.pause(); await releaseWakeLock(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
   });
-
   ui.elements.resumeButton.addEventListener("click", async () => {
-    timer.resume();
-    await requestWakeLockIfNeeded();
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: false });
+    timer.resume(); await requestWakeLockIfNeeded(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
   });
-
   ui.elements.resetButton.addEventListener("click", async () => {
-    if (state.settings.confirmReset && !window.confirm("Reset the current 8-minute timer?")) {
-      return;
-    }
-    timer.reset();
-    await releaseWakeLock();
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: false });
+    if (state.settings.confirmReset && !window.confirm("Reset the current 8-minute timer?")) return;
+    timer.reset(); await releaseWakeLock(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
   });
+  ui.elements.countYesButton.addEventListener("click", (event) => { event.preventDefault(); handleCountDecision(true); });
+  ui.elements.countNoButton.addEventListener("click", (event) => { event.preventDefault(); handleCountDecision(false); });
+  ui.elements.completionDialog.addEventListener("cancel", (event) => { if (state.timer.phase === "completed-awaiting-decision") event.preventDefault(); });
 
-  ui.elements.countYesButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    handleCountDecision(true);
-  });
-
-  ui.elements.countNoButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    handleCountDecision(false);
-  });
-
-  ui.elements.completionDialog.addEventListener("cancel", (event) => {
-    if (state.timer.phase === "completed-awaiting-decision") {
-      event.preventDefault();
-    }
-  });
-
-  ui.elements.slideshowAddButton.addEventListener("click", () => {
-    ui.elements.slideshowFileInput.click();
-  });
-
+  ui.elements.slideshowAddButton.addEventListener("click", () => { ui.elements.slideshowFileInput.click(); });
   ui.elements.slideshowFileInput.addEventListener("change", async (event) => {
-    const files = event.target.files;
-    event.target.value = "";
-    if (!files || !files.length) {
-      return;
-    }
-    await handleSlideshowFiles(files);
+    const files = event.target.files; event.target.value = ""; if (!files || !files.length) return; await handleSlideshowFiles(files);
   });
-
-  ui.elements.slideshowStartButton.addEventListener("click", () => {
-    startSlideshow();
-  });
-
-  ui.elements.slideshowStopButton.addEventListener("click", () => {
-    stopSlideshow();
-  });
-
+  ui.elements.slideshowStartButton.addEventListener("click", () => { startSlideshow(); });
+  ui.elements.slideshowStopButton.addEventListener("click", () => { stopSlideshow(); });
   ui.elements.slideshowClearButton.addEventListener("click", () => {
-    if (!state.slideshow.images.length) {
-      return;
-    }
-    if (!window.confirm("Clear all slideshow images?")) {
-      return;
-    }
-    state.slideshow.images = [];
-    state.slideshow.order = [];
-    state.slideshow.currentIndex = 0;
-    state.slideshow.running = false;
-    stopSlideshowLoop();
-    commitState({ forceStatic: true });
+    if (!state.slideshow.images.length) return;
+    if (!window.confirm("Clear all slideshow images?")) return;
+    state.slideshow.images = []; state.slideshow.order = []; state.slideshow.currentIndex = 0; state.slideshow.running = false; stopSlideshowLoop(); commitState({ forceStatic: true });
   });
 
   document.getElementById("export-button").addEventListener("click", () => {
-    downloadJson(`harivansh-mala-backup-${getLocalDateKey()}.json`, {
-      version: state.version,
-      exportedAt: new Date().toISOString(),
-      history: state.history
-    });
+    downloadJson(`harivansh-mala-backup-${getLocalDateKey()}.json`, { version: state.version, exportedAt: new Date().toISOString(), history: state.history });
     ui.setSettingsMessage("Backup exported.");
   });
-
-  document.getElementById("import-button").addEventListener("click", () => {
-    document.getElementById("import-file").click();
-  });
-
+  document.getElementById("import-button").addEventListener("click", () => { document.getElementById("import-file").click(); });
   document.getElementById("import-file").addEventListener("change", async (event) => {
-    const [file] = event.target.files || [];
-    event.target.value = "";
-    if (!file) {
-      return;
-    }
-
+    const [file] = event.target.files || []; event.target.value = ""; if (!file) return;
     try {
-      const imported = parseImportedState(await file.text());
-      mergeHistory(state.history, imported.history);
-      ensureDateRollover(state);
-      ui.setSettingsMessage("Backup imported successfully.");
-      commitState({ forceTimer: true, forceStatic: true });
-    } catch (error) {
-      ui.setSettingsMessage(error instanceof Error ? error.message : "Import failed.");
-    }
+      const imported = parseImportedState(await file.text()); mergeHistory(state.history, imported.history); ensureDateRollover(state); ui.setSettingsMessage("Backup imported successfully."); commitState({ forceTimer: true, forceStatic: true });
+    } catch (error) { ui.setSettingsMessage(error instanceof Error ? error.message : "Import failed."); }
   });
-
   document.getElementById("reset-today-button").addEventListener("click", () => {
-    if (state.settings.confirmReset && !window.confirm("Reset today's mala count?")) {
-      return;
-    }
-    resetTodayCount(state);
-    ui.setSettingsMessage("Today's count has been reset.");
-    commitState({ forceTimer: false, forceStatic: true });
+    if (state.settings.confirmReset && !window.confirm("Reset today's mala count?")) return;
+    resetTodayCount(state); ui.setSettingsMessage("Today's count has been reset."); commitState({ forceTimer: false, forceStatic: true });
   });
-
   document.getElementById("reset-all-button").addEventListener("click", async () => {
-    if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) {
-      return;
-    }
-    resetStoredState();
-    Object.assign(state, loadState());
-    timer.setIdle();
-    stopSlideshowLoop();
-    await releaseWakeLock();
-    applySavedTheme();
-    hasRenderedThemeGrid = false;
-    ui.setSettingsMessage("All data has been reset.");
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: true, forceThemes: true });
+    if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) return;
+    resetStoredState(); Object.assign(state, loadState()); timer.setIdle(); stopSlideshowLoop(); await releaseWakeLock(); applySavedTheme(); hasRenderedThemeGrid = false; ui.setSettingsMessage("All data has been reset."); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true, forceThemes: true });
   });
-
-  document.getElementById("setting-sound").addEventListener("change", (event) => {
-    state.settings.sound = event.target.checked;
-    persist();
-  });
-
-  document.getElementById("setting-vibration").addEventListener("change", (event) => {
-    state.settings.vibration = event.target.checked;
-    persist();
-  });
-
-  document.getElementById("setting-confirm-reset").addEventListener("change", (event) => {
-    state.settings.confirmReset = event.target.checked;
-    persist();
-  });
-
-  document.getElementById("setting-show-stats-home").addEventListener("change", (event) => {
-    state.settings.showStatsOnHome = event.target.checked;
-    commitState({ forceTimer: false, forceStatic: true });
-  });
-
+  document.getElementById("setting-sound").addEventListener("change", (event) => { state.settings.sound = event.target.checked; persist(); });
+  document.getElementById("setting-vibration").addEventListener("change", (event) => { state.settings.vibration = event.target.checked; persist(); });
+  document.getElementById("setting-confirm-reset").addEventListener("change", (event) => { state.settings.confirmReset = event.target.checked; persist(); });
+  document.getElementById("setting-show-stats-home").addEventListener("change", (event) => { state.settings.showStatsOnHome = event.target.checked; commitState({ forceTimer: false, forceStatic: true }); });
   document.getElementById("setting-wake-lock").addEventListener("change", async (event) => {
-    state.settings.wakeLock = event.target.checked;
-    if (!state.settings.wakeLock) {
-      await releaseWakeLock();
-    } else {
-      await requestWakeLockIfNeeded();
-    }
-    persist();
+    state.settings.wakeLock = event.target.checked; if (!state.settings.wakeLock) await releaseWakeLock(); else await requestWakeLockIfNeeded(); persist();
   });
 
-  window.addEventListener("beforeinstallprompt", (event) => {
-    event.preventDefault();
-    deferredInstallPrompt = event;
-    ui.elements.installButton.hidden = false;
-  });
-
+  window.addEventListener("beforeinstallprompt", (event) => { event.preventDefault(); deferredInstallPrompt = event; ui.elements.installButton.hidden = false; });
   ui.elements.installButton.addEventListener("click", async () => {
-    if (!deferredInstallPrompt) {
-      return;
-    }
-    deferredInstallPrompt.prompt();
-    try {
-      await deferredInstallPrompt.userChoice;
-    } catch {
-      // no-op
-    }
-    deferredInstallPrompt = null;
-    ui.elements.installButton.hidden = true;
+    if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); try { await deferredInstallPrompt.userChoice; } catch {} deferredInstallPrompt = null; ui.elements.installButton.hidden = true;
   });
 
   document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === "visible") {
       const result = ensureFreshState();
-      if (result.dayChanged || result.timerJustCompleted) {
-        commitState({ forceTimer: true, forceStatic: true });
-      } else {
-        syncUi({ forceTimer: true, forceStatic: false });
-      }
-      await requestWakeLockIfNeeded();
-      refreshLoopForPhase();
-      if (state.slideshow.running) {
-        scheduleNextSlide();
-      }
-    } else {
-      persist();
-      stopTimerLoop();
-      stopSlideshowLoop();
-    }
+      if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
+      else syncUi({ forceTimer: true, forceStatic: false });
+      await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
+    } else { persist(); stopTimerLoop(); stopSlideshowLoop(); }
   });
-
   window.addEventListener("focus", async () => {
     const result = ensureFreshState();
-    if (result.dayChanged || result.timerJustCompleted) {
-      commitState({ forceTimer: true, forceStatic: true });
-    } else {
-      syncUi({ forceTimer: true, forceStatic: false });
-    }
-    await requestWakeLockIfNeeded();
-    refreshLoopForPhase();
-    if (state.slideshow.running) {
-      scheduleNextSlide();
-    }
+    if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
+    else syncUi({ forceTimer: true, forceStatic: false });
+    await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
   });
-
   window.addEventListener("pageshow", async () => {
     const result = ensureFreshState();
-    if (result.dayChanged || result.timerJustCompleted) {
-      commitState({ forceTimer: true, forceStatic: true });
-    } else {
-      syncUi({ forceTimer: true, forceStatic: false });
-    }
-    await requestWakeLockIfNeeded();
-    refreshLoopForPhase();
-    if (state.slideshow.running) {
-      scheduleNextSlide();
-    }
+    if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
+    else syncUi({ forceTimer: true, forceStatic: false });
+    await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
   });
 
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
-    });
-  }
+  if ("serviceWorker" in navigator) window.addEventListener("load", () => { navigator.serviceWorker.register("./sw.js").catch(() => {}); });
 }
 
 ensureDateRollover(state);
@@ -686,7 +412,5 @@ applySavedTheme();
 bindEvents();
 syncUi({ forceTimer: true, forceStatic: true, forceThemes: true });
 refreshLoopForPhase();
-if (state.slideshow.running) {
-  scheduleNextSlide();
-}
+if (state.slideshow.running) scheduleNextSlide();
 persist();
