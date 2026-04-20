@@ -18,8 +18,15 @@ let lastDayKey = "";
 let hasRenderedThemeGrid = false;
 let slideshowTimeoutId = null;
 let slideshowTransitionBusy = false;
+let serviceWorkerReloaded = false;
 
-const persist = () => saveState(state);
+const persist = (message) => {
+  const ok = saveState(state);
+  if (!ok && message) {
+    ui.setSettingsMessage(message);
+  }
+  return ok;
+};
 
 function formatTodayLabel() {
   return new Date().toLocaleDateString(undefined, {
@@ -37,19 +44,33 @@ function applySavedTheme() {
 
 async function requestWakeLockIfNeeded() {
   if (!state.settings.wakeLock || state.timer.phase !== "running" || !("wakeLock" in navigator)) return;
-  try { wakeLock = await navigator.wakeLock.request("screen"); } catch { wakeLock = null; }
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+  } catch {
+    wakeLock = null;
+  }
 }
 
 async function releaseWakeLock() {
-  try { if (wakeLock) await wakeLock.release(); } catch {} finally { wakeLock = null; }
+  try {
+    if (wakeLock) await wakeLock.release();
+  } catch {
+    // no-op
+  } finally {
+    wakeLock = null;
+  }
 }
 
 function ensureSlideshowState() {
-  if (!state.slideshow || typeof state.slideshow !== "object") state.slideshow = { images: [], running: false, currentIndex: 0, order: [], intervalMs: 5000, lastStartedAt: null };
+  if (!state.slideshow || typeof state.slideshow !== "object") {
+    state.slideshow = { images: [], running: false, currentIndex: 0, order: [], intervalMs: 5000, lastStartedAt: null };
+  }
   state.slideshow.images = Array.isArray(state.slideshow.images) ? state.slideshow.images : [];
   state.slideshow.order = Array.isArray(state.slideshow.order) ? state.slideshow.order : [];
-  state.slideshow.currentIndex = Number.isInteger(state.slideshow.currentIndex) ? state.slideshow.currentIndex : 0;
   state.slideshow.intervalMs = Number.isFinite(state.slideshow.intervalMs) ? state.slideshow.intervalMs : 5000;
+  state.slideshow.currentIndex = Number.isInteger(state.slideshow.currentIndex) ? state.slideshow.currentIndex : 0;
+  const maxIndex = Math.max((state.slideshow.order.length || state.slideshow.images.length) - 1, 0);
+  state.slideshow.currentIndex = Math.min(Math.max(state.slideshow.currentIndex, 0), maxIndex);
   state.slideshow.running = Boolean(state.slideshow.running) && state.slideshow.images.length > 0;
 }
 
@@ -116,7 +137,10 @@ function syncUi({ forceTimer = false, forceStatic = false, forceThemes = false }
   if (state.timer.phase === "completed-awaiting-decision" && !state.timer.completionHandled) handleCompletionEffects();
 }
 
-function commitState(options = {}) { persist(); syncUi(options); }
+function commitState(options = {}) {
+  persist();
+  syncUi(options);
+}
 
 function startTimerLoop() {
   if (animationFrameId !== null) return;
@@ -228,6 +252,7 @@ async function handleSlideshowFiles(files) {
     ui.setSettingsMessage("No valid image files were selected.");
     return;
   }
+  const previousSlideshow = JSON.parse(JSON.stringify(state.slideshow));
   const readers = validFiles.map((file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, name: file.name, dataUrl: reader.result });
@@ -241,7 +266,11 @@ async function handleSlideshowFiles(files) {
     state.slideshow.currentIndex = 0;
     state.slideshow.running = false;
     stopSlideshowLoop();
-    if (!persist()) throw new Error("Images could not be saved locally. Try fewer or smaller images.");
+    if (!persist()) {
+      state.slideshow = previousSlideshow;
+      syncUi({ forceStatic: true });
+      throw new Error("Images could not be saved locally. Try fewer or smaller images.");
+    }
     syncUi({ forceStatic: true });
     ui.setSettingsMessage(`${images.length} image${images.length === 1 ? "" : "s"} added.`);
   } catch (error) {
@@ -275,12 +304,14 @@ async function playCompletionSound() {
     gain.connect(audioContext.destination);
     oscillator.start(now);
     oscillator.stop(now + 0.78);
-  } catch {}
+  } catch {
+    // fail silently on autoplay/audio restrictions
+  }
 }
 
 function vibrateCompletion() {
   if (state.settings.vibration && "vibrate" in navigator) {
-    try { navigator.vibrate([120, 60, 120]); } catch {}
+    try { navigator.vibrate([120, 60, 120]); } catch { /* no-op */ }
   }
 }
 
@@ -317,68 +348,207 @@ async function handleCountDecision(shouldCount) {
   commitState({ forceTimer: true, forceStatic: true });
 }
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (serviceWorkerReloaded) return;
+    serviceWorkerReloaded = true;
+    window.location.reload();
+  });
+
+  window.addEventListener("load", async () => {
+    try {
+      const registration = await navigator.serviceWorker.register("./sw.js");
+      registration.update().catch(() => {});
+
+      if (registration.waiting) {
+        registration.waiting.postMessage({ type: "SKIP_WAITING" });
+      }
+
+      registration.addEventListener("updatefound", () => {
+        const newWorker = registration.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener("statechange", () => {
+          if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+            newWorker.postMessage({ type: "SKIP_WAITING" });
+          }
+        });
+      });
+    } catch {
+      // no-op
+    }
+  });
+}
+
 function bindEvents() {
-  ui.bindNavigation(() => { if (state.slideshow.running) scheduleNextSlide(); });
+  ui.bindNavigation(() => {
+    if (state.slideshow.running) scheduleNextSlide();
+  });
 
   ui.elements.startButton.addEventListener("click", async () => {
-    ensureDateRollover(state); timer.start(); await requestWakeLockIfNeeded(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true });
+    ensureDateRollover(state);
+    timer.start();
+    await requestWakeLockIfNeeded();
+    refreshLoopForPhase();
+    commitState({ forceTimer: true, forceStatic: true });
   });
+
   ui.elements.pauseButton.addEventListener("click", async () => {
-    timer.pause(); await releaseWakeLock(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
+    timer.pause();
+    await releaseWakeLock();
+    refreshLoopForPhase();
+    commitState({ forceTimer: true, forceStatic: false });
   });
+
   ui.elements.resumeButton.addEventListener("click", async () => {
-    timer.resume(); await requestWakeLockIfNeeded(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
+    timer.resume();
+    await requestWakeLockIfNeeded();
+    refreshLoopForPhase();
+    commitState({ forceTimer: true, forceStatic: false });
   });
+
   ui.elements.resetButton.addEventListener("click", async () => {
     if (state.settings.confirmReset && !window.confirm("Reset the current 8-minute timer?")) return;
-    timer.reset(); await releaseWakeLock(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
+    timer.reset();
+    await releaseWakeLock();
+    refreshLoopForPhase();
+    commitState({ forceTimer: true, forceStatic: false });
   });
-  ui.elements.countYesButton.addEventListener("click", (event) => { event.preventDefault(); handleCountDecision(true); });
-  ui.elements.countNoButton.addEventListener("click", (event) => { event.preventDefault(); handleCountDecision(false); });
-  ui.elements.completionDialog.addEventListener("cancel", (event) => { if (state.timer.phase === "completed-awaiting-decision") event.preventDefault(); });
 
-  ui.elements.slideshowAddButton.addEventListener("click", () => { ui.elements.slideshowFileInput.click(); });
-  ui.elements.slideshowFileInput.addEventListener("change", async (event) => {
-    const files = event.target.files; event.target.value = ""; if (!files || !files.length) return; await handleSlideshowFiles(files);
+  ui.elements.countYesButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    handleCountDecision(true);
   });
-  ui.elements.slideshowStartButton.addEventListener("click", () => { startSlideshow(); });
-  ui.elements.slideshowStopButton.addEventListener("click", () => { stopSlideshow(); });
+
+  ui.elements.countNoButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    handleCountDecision(false);
+  });
+
+  ui.elements.completionDialog.addEventListener("cancel", (event) => {
+    if (state.timer.phase === "completed-awaiting-decision") event.preventDefault();
+  });
+
+  ui.elements.slideshowAddButton.addEventListener("click", () => {
+    ui.elements.slideshowFileInput.click();
+  });
+
+  ui.elements.slideshowFileInput.addEventListener("change", async (event) => {
+    const files = event.target.files;
+    event.target.value = "";
+    if (!files || !files.length) return;
+    await handleSlideshowFiles(files);
+  });
+
+  ui.elements.slideshowStartButton.addEventListener("click", () => {
+    startSlideshow();
+  });
+
+  ui.elements.slideshowStopButton.addEventListener("click", () => {
+    stopSlideshow();
+  });
+
   ui.elements.slideshowClearButton.addEventListener("click", () => {
     if (!state.slideshow.images.length) return;
     if (!window.confirm("Clear all slideshow images?")) return;
-    state.slideshow.images = []; state.slideshow.order = []; state.slideshow.currentIndex = 0; state.slideshow.running = false; stopSlideshowLoop(); commitState({ forceStatic: true });
+    state.slideshow.images = [];
+    state.slideshow.order = [];
+    state.slideshow.currentIndex = 0;
+    state.slideshow.running = false;
+    stopSlideshowLoop();
+    commitState({ forceStatic: true });
   });
 
   document.getElementById("export-button").addEventListener("click", () => {
-    downloadJson(`harivansh-mala-backup-${getLocalDateKey()}.json`, { version: state.version, exportedAt: new Date().toISOString(), history: state.history });
+    downloadJson(`harivansh-mala-backup-${getLocalDateKey()}.json`, {
+      version: state.version,
+      exportedAt: new Date().toISOString(),
+      history: state.history
+    });
     ui.setSettingsMessage("Backup exported.");
   });
-  document.getElementById("import-button").addEventListener("click", () => { document.getElementById("import-file").click(); });
-  document.getElementById("import-file").addEventListener("change", async (event) => {
-    const [file] = event.target.files || []; event.target.value = ""; if (!file) return;
-    try {
-      const imported = parseImportedState(await file.text()); mergeHistory(state.history, imported.history); ensureDateRollover(state); ui.setSettingsMessage("Backup imported successfully."); commitState({ forceTimer: true, forceStatic: true });
-    } catch (error) { ui.setSettingsMessage(error instanceof Error ? error.message : "Import failed."); }
-  });
-  document.getElementById("reset-today-button").addEventListener("click", () => {
-    if (state.settings.confirmReset && !window.confirm("Reset today's mala count?")) return;
-    resetTodayCount(state); ui.setSettingsMessage("Today's count has been reset."); commitState({ forceTimer: false, forceStatic: true });
-  });
-  document.getElementById("reset-all-button").addEventListener("click", async () => {
-    if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) return;
-    resetStoredState(); Object.assign(state, loadState()); timer.setIdle(); stopSlideshowLoop(); await releaseWakeLock(); applySavedTheme(); hasRenderedThemeGrid = false; ui.setSettingsMessage("All data has been reset."); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true, forceThemes: true });
-  });
-  document.getElementById("setting-sound").addEventListener("change", (event) => { state.settings.sound = event.target.checked; persist(); });
-  document.getElementById("setting-vibration").addEventListener("change", (event) => { state.settings.vibration = event.target.checked; persist(); });
-  document.getElementById("setting-confirm-reset").addEventListener("change", (event) => { state.settings.confirmReset = event.target.checked; persist(); });
-  document.getElementById("setting-show-stats-home").addEventListener("change", (event) => { state.settings.showStatsOnHome = event.target.checked; commitState({ forceTimer: false, forceStatic: true }); });
-  document.getElementById("setting-wake-lock").addEventListener("change", async (event) => {
-    state.settings.wakeLock = event.target.checked; if (!state.settings.wakeLock) await releaseWakeLock(); else await requestWakeLockIfNeeded(); persist();
+
+  document.getElementById("import-button").addEventListener("click", () => {
+    document.getElementById("import-file").click();
   });
 
-  window.addEventListener("beforeinstallprompt", (event) => { event.preventDefault(); deferredInstallPrompt = event; ui.elements.installButton.hidden = false; });
+  document.getElementById("import-file").addEventListener("change", async (event) => {
+    const [file] = event.target.files || [];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const imported = parseImportedState(await file.text());
+      mergeHistory(state.history, imported.history);
+      ensureDateRollover(state);
+      ui.setSettingsMessage("Backup imported successfully.");
+      commitState({ forceTimer: true, forceStatic: true });
+    } catch (error) {
+      ui.setSettingsMessage(error instanceof Error ? error.message : "Import failed.");
+    }
+  });
+
+  document.getElementById("reset-today-button").addEventListener("click", () => {
+    if (state.settings.confirmReset && !window.confirm("Reset today's mala count?")) return;
+    resetTodayCount(state);
+    ui.setSettingsMessage("Today's count has been reset.");
+    commitState({ forceTimer: false, forceStatic: true });
+  });
+
+  document.getElementById("reset-all-button").addEventListener("click", async () => {
+    if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) return;
+    resetStoredState();
+    Object.assign(state, loadState());
+    ensureSlideshowState();
+    timer.setIdle();
+    stopSlideshowLoop();
+    await releaseWakeLock();
+    applySavedTheme();
+    hasRenderedThemeGrid = false;
+    ui.setSettingsMessage("All data has been reset.");
+    refreshLoopForPhase();
+    commitState({ forceTimer: true, forceStatic: true, forceThemes: true });
+  });
+
+  document.getElementById("setting-sound").addEventListener("change", (event) => {
+    state.settings.sound = event.target.checked;
+    persist();
+  });
+
+  document.getElementById("setting-vibration").addEventListener("change", (event) => {
+    state.settings.vibration = event.target.checked;
+    persist();
+  });
+
+  document.getElementById("setting-confirm-reset").addEventListener("change", (event) => {
+    state.settings.confirmReset = event.target.checked;
+    persist();
+  });
+
+  document.getElementById("setting-show-stats-home").addEventListener("change", (event) => {
+    state.settings.showStatsOnHome = event.target.checked;
+    commitState({ forceTimer: false, forceStatic: true });
+  });
+
+  document.getElementById("setting-wake-lock").addEventListener("change", async (event) => {
+    state.settings.wakeLock = event.target.checked;
+    if (!state.settings.wakeLock) await releaseWakeLock();
+    else await requestWakeLockIfNeeded();
+    persist();
+  });
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    ui.elements.installButton.hidden = false;
+  });
+
   ui.elements.installButton.addEventListener("click", async () => {
-    if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); try { await deferredInstallPrompt.userChoice; } catch {} deferredInstallPrompt = null; ui.elements.installButton.hidden = true;
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    try { await deferredInstallPrompt.userChoice; } catch { /* no-op */ }
+    deferredInstallPrompt = null;
+    ui.elements.installButton.hidden = true;
   });
 
   document.addEventListener("visibilitychange", async () => {
@@ -386,23 +556,33 @@ function bindEvents() {
       const result = ensureFreshState();
       if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
       else syncUi({ forceTimer: true, forceStatic: false });
-      await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
-    } else { persist(); stopTimerLoop(); stopSlideshowLoop(); }
+      await requestWakeLockIfNeeded();
+      refreshLoopForPhase();
+      if (state.slideshow.running) scheduleNextSlide();
+    } else {
+      persist();
+      stopTimerLoop();
+      stopSlideshowLoop();
+    }
   });
+
   window.addEventListener("focus", async () => {
     const result = ensureFreshState();
     if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
     else syncUi({ forceTimer: true, forceStatic: false });
-    await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
+    await requestWakeLockIfNeeded();
+    refreshLoopForPhase();
+    if (state.slideshow.running) scheduleNextSlide();
   });
+
   window.addEventListener("pageshow", async () => {
     const result = ensureFreshState();
     if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
     else syncUi({ forceTimer: true, forceStatic: false });
-    await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
+    await requestWakeLockIfNeeded();
+    refreshLoopForPhase();
+    if (state.slideshow.running) scheduleNextSlide();
   });
-
-  if ("serviceWorker" in navigator) window.addEventListener("load", () => { navigator.serviceWorker.register("./sw.js").catch(() => {}); });
 }
 
 ensureDateRollover(state);
@@ -410,6 +590,7 @@ ensureSlideshowState();
 lastDayKey = state.currentDate;
 applySavedTheme();
 bindEvents();
+registerServiceWorker();
 syncUi({ forceTimer: true, forceStatic: true, forceThemes: true });
 refreshLoopForPhase();
 if (state.slideshow.running) scheduleNextSlide();
