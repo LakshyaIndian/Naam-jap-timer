@@ -16,6 +16,8 @@ let timerUiLastSecond = null;
 let timerUiLastPhase = null;
 let lastDayKey = "";
 let hasRenderedThemeGrid = false;
+let slideshowTimeoutId = null;
+let slideshowTransitionBusy = false;
 
 const persist = () => saveState(state);
 
@@ -59,13 +61,52 @@ async function releaseWakeLock() {
   }
 }
 
+function ensureSlideshowState() {
+  if (!state.slideshow || typeof state.slideshow !== "object") {
+    state.slideshow = { images: [], running: false, currentIndex: 0, order: [], intervalMs: 5000, lastStartedAt: null };
+  }
+  state.slideshow.images = Array.isArray(state.slideshow.images) ? state.slideshow.images : [];
+  state.slideshow.order = Array.isArray(state.slideshow.order) ? state.slideshow.order : [];
+  state.slideshow.currentIndex = Number.isInteger(state.slideshow.currentIndex) ? state.slideshow.currentIndex : 0;
+  state.slideshow.intervalMs = Number.isFinite(state.slideshow.intervalMs) ? state.slideshow.intervalMs : 5000;
+  state.slideshow.running = Boolean(state.slideshow.running) && state.slideshow.images.length > 0;
+}
+
 function ensureFreshState() {
+  ensureSlideshowState();
   const previousDayKey = state.currentDate;
   const currentDayKey = ensureDateRollover(state);
   const timerJustCompleted = timer.recoverCompletion(Date.now());
   const dayChanged = previousDayKey !== currentDayKey;
   lastDayKey = currentDayKey;
   return { dayChanged, timerJustCompleted };
+}
+
+function getOrderedSlideshowImages() {
+  const { images, order } = state.slideshow;
+  if (!images.length) {
+    return [];
+  }
+  if (!order.length) {
+    return images;
+  }
+  return order.map((index) => images[index]).filter(Boolean);
+}
+
+function shuffleIndexes(length) {
+  const indexes = Array.from({ length }, (_, index) => index);
+  for (let i = indexes.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indexes[i], indexes[j]] = [indexes[j], indexes[i]];
+  }
+  return indexes;
+}
+
+function stopSlideshowLoop() {
+  if (slideshowTimeoutId !== null) {
+    clearTimeout(slideshowTimeoutId);
+    slideshowTimeoutId = null;
+  }
 }
 
 function renderTimerUi(force = false) {
@@ -77,12 +118,7 @@ function renderTimerUi(force = false) {
     return;
   }
 
-  ui.renderTimer({
-    phase,
-    remainingMs,
-    progress: timer.getProgress(Date.now())
-  });
-
+  ui.renderTimer({ phase, remainingMs, progress: timer.getProgress(Date.now()) });
   timerUiLastPhase = phase;
   timerUiLastSecond = displaySecond;
 }
@@ -98,6 +134,7 @@ function renderStaticUi(forceThemes = false) {
   ui.renderHistorySummary(stats);
   ui.renderHistoryGroups(getGroupedHistory(state.history));
   ui.renderSettings(state.settings);
+  ui.renderSlideshow(state.slideshow, handleDeleteSlideshowImage);
 
   if (!hasRenderedThemeGrid || forceThemes) {
     ui.renderThemes(state.theme, handleThemeChange);
@@ -154,6 +191,145 @@ function refreshLoopForPhase() {
   } else {
     stopTimerLoop();
     syncUi({ forceTimer: true, forceStatic: false });
+  }
+}
+
+function transitionToSlide(nextImage) {
+  const current = ui.elements.slideshowImageCurrent;
+  const upcoming = ui.elements.slideshowImageNext;
+
+  if (!nextImage || slideshowTransitionBusy) {
+    return;
+  }
+
+  slideshowTransitionBusy = true;
+  upcoming.src = nextImage.dataUrl;
+  upcoming.classList.add("active");
+
+  window.setTimeout(() => {
+    current.src = nextImage.dataUrl;
+    current.classList.add("active");
+    upcoming.classList.remove("active");
+    upcoming.removeAttribute("src");
+    slideshowTransitionBusy = false;
+  }, 380);
+}
+
+function scheduleNextSlide() {
+  stopSlideshowLoop();
+
+  if (!state.slideshow.running || state.slideshow.images.length <= 1) {
+    return;
+  }
+
+  slideshowTimeoutId = window.setTimeout(() => {
+    advanceSlideshow();
+    scheduleNextSlide();
+  }, state.slideshow.intervalMs);
+}
+
+function startSlideshow() {
+  ensureSlideshowState();
+  if (!state.slideshow.images.length) {
+    ui.setSettingsMessage("Add at least one image before starting the slideshow.");
+    return;
+  }
+
+  state.slideshow.order = shuffleIndexes(state.slideshow.images.length);
+  state.slideshow.currentIndex = 0;
+  state.slideshow.running = true;
+  state.slideshow.lastStartedAt = Date.now();
+  commitState({ forceStatic: true });
+  scheduleNextSlide();
+}
+
+function stopSlideshow() {
+  state.slideshow.running = false;
+  stopSlideshowLoop();
+  commitState({ forceStatic: true });
+}
+
+function advanceSlideshow() {
+  const orderedImages = getOrderedSlideshowImages();
+  if (!orderedImages.length) {
+    stopSlideshow();
+    return;
+  }
+
+  if (orderedImages.length === 1) {
+    state.slideshow.currentIndex = 0;
+    commitState({ forceStatic: true });
+    return;
+  }
+
+  state.slideshow.currentIndex = (state.slideshow.currentIndex + 1) % orderedImages.length;
+  transitionToSlide(orderedImages[state.slideshow.currentIndex]);
+  persist();
+  ui.renderSlideshow(state.slideshow, handleDeleteSlideshowImage);
+}
+
+function handleDeleteSlideshowImage(imageId) {
+  ensureSlideshowState();
+  const originalLength = state.slideshow.images.length;
+  if (!originalLength) {
+    return;
+  }
+
+  state.slideshow.images = state.slideshow.images.filter((image) => image.id !== imageId);
+
+  if (!state.slideshow.images.length) {
+    state.slideshow.order = [];
+    state.slideshow.currentIndex = 0;
+    state.slideshow.running = false;
+    stopSlideshowLoop();
+    commitState({ forceStatic: true });
+    return;
+  }
+
+  const oldOrdered = getOrderedSlideshowImages().map((image) => image.id);
+  state.slideshow.order = shuffleIndexes(state.slideshow.images.length);
+  const currentImageId = oldOrdered[state.slideshow.currentIndex];
+  const newOrdered = getOrderedSlideshowImages();
+  const newIndex = newOrdered.findIndex((image) => image.id === currentImageId);
+  state.slideshow.currentIndex = Math.max(0, newIndex);
+  if (originalLength !== state.slideshow.images.length && state.slideshow.running) {
+    scheduleNextSlide();
+  }
+  commitState({ forceStatic: true });
+}
+
+async function handleSlideshowFiles(files) {
+  const validFiles = [...files].filter((file) => file.type.startsWith("image/"));
+  if (!validFiles.length) {
+    ui.setSettingsMessage("No valid image files were selected.");
+    return;
+  }
+
+  const readers = validFiles.map((file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      name: file.name,
+      dataUrl: reader.result
+    });
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  }));
+
+  try {
+    const images = await Promise.all(readers);
+    state.slideshow.images.push(...images);
+    state.slideshow.order = state.slideshow.images.map((_, index) => index);
+    state.slideshow.currentIndex = 0;
+    state.slideshow.running = false;
+    stopSlideshowLoop();
+    if (!persist()) {
+      throw new Error("Images could not be saved locally. Try fewer or smaller images.");
+    }
+    syncUi({ forceStatic: true });
+    ui.setSettingsMessage(`${images.length} image${images.length === 1 ? "" : "s"} added.`);
+  } catch (error) {
+    ui.setSettingsMessage(error instanceof Error ? error.message : "Image upload failed.");
   }
 }
 
@@ -220,7 +396,17 @@ function handleCompletionEffects() {
   persist();
 }
 
-function handleCountDecision(shouldCount) {
+async function maybeRestartTimerForSlideshow() {
+  if (ui.getActiveScreen() !== "slideshow") {
+    return;
+  }
+  ensureDateRollover(state);
+  timer.start();
+  await requestWakeLockIfNeeded();
+  refreshLoopForPhase();
+}
+
+async function handleCountDecision(shouldCount) {
   if (completionInFlight || state.timer.completionDecisionMade) {
     return;
   }
@@ -234,14 +420,19 @@ function handleCountDecision(shouldCount) {
   }
 
   timer.setIdle();
-  completionInFlight = false;
   ui.closeCompletionDialog();
+  await maybeRestartTimerForSlideshow();
+  completionInFlight = false;
   refreshLoopForPhase();
   commitState({ forceTimer: true, forceStatic: true });
 }
 
 function bindEvents() {
-  ui.bindNavigation();
+  ui.bindNavigation(() => {
+    if (state.slideshow.running) {
+      scheduleNextSlide();
+    }
+  });
 
   ui.elements.startButton.addEventListener("click", async () => {
     ensureDateRollover(state);
@@ -269,7 +460,6 @@ function bindEvents() {
     if (state.settings.confirmReset && !window.confirm("Reset the current 8-minute timer?")) {
       return;
     }
-
     timer.reset();
     await releaseWakeLock();
     refreshLoopForPhase();
@@ -292,6 +482,42 @@ function bindEvents() {
     }
   });
 
+  ui.elements.slideshowAddButton.addEventListener("click", () => {
+    ui.elements.slideshowFileInput.click();
+  });
+
+  ui.elements.slideshowFileInput.addEventListener("change", async (event) => {
+    const files = event.target.files;
+    event.target.value = "";
+    if (!files || !files.length) {
+      return;
+    }
+    await handleSlideshowFiles(files);
+  });
+
+  ui.elements.slideshowStartButton.addEventListener("click", () => {
+    startSlideshow();
+  });
+
+  ui.elements.slideshowStopButton.addEventListener("click", () => {
+    stopSlideshow();
+  });
+
+  ui.elements.slideshowClearButton.addEventListener("click", () => {
+    if (!state.slideshow.images.length) {
+      return;
+    }
+    if (!window.confirm("Clear all slideshow images?")) {
+      return;
+    }
+    state.slideshow.images = [];
+    state.slideshow.order = [];
+    state.slideshow.currentIndex = 0;
+    state.slideshow.running = false;
+    stopSlideshowLoop();
+    commitState({ forceStatic: true });
+  });
+
   document.getElementById("export-button").addEventListener("click", () => {
     downloadJson(`harivansh-mala-backup-${getLocalDateKey()}.json`, {
       version: state.version,
@@ -308,7 +534,6 @@ function bindEvents() {
   document.getElementById("import-file").addEventListener("change", async (event) => {
     const [file] = event.target.files || [];
     event.target.value = "";
-
     if (!file) {
       return;
     }
@@ -328,20 +553,19 @@ function bindEvents() {
     if (state.settings.confirmReset && !window.confirm("Reset today's mala count?")) {
       return;
     }
-
     resetTodayCount(state);
     ui.setSettingsMessage("Today's count has been reset.");
     commitState({ forceTimer: false, forceStatic: true });
   });
 
   document.getElementById("reset-all-button").addEventListener("click", async () => {
-    if (!window.confirm("Reset all mala data, history, and timer state? This cannot be undone.")) {
+    if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) {
       return;
     }
-
     resetStoredState();
     Object.assign(state, loadState());
     timer.setIdle();
+    stopSlideshowLoop();
     await releaseWakeLock();
     applySavedTheme();
     hasRenderedThemeGrid = false;
@@ -372,13 +596,11 @@ function bindEvents() {
 
   document.getElementById("setting-wake-lock").addEventListener("change", async (event) => {
     state.settings.wakeLock = event.target.checked;
-
     if (!state.settings.wakeLock) {
       await releaseWakeLock();
     } else {
       await requestWakeLockIfNeeded();
     }
-
     persist();
   });
 
@@ -392,15 +614,12 @@ function bindEvents() {
     if (!deferredInstallPrompt) {
       return;
     }
-
     deferredInstallPrompt.prompt();
-
     try {
       await deferredInstallPrompt.userChoice;
     } catch {
       // no-op
     }
-
     deferredInstallPrompt = null;
     ui.elements.installButton.hidden = true;
   });
@@ -415,9 +634,13 @@ function bindEvents() {
       }
       await requestWakeLockIfNeeded();
       refreshLoopForPhase();
+      if (state.slideshow.running) {
+        scheduleNextSlide();
+      }
     } else {
       persist();
       stopTimerLoop();
+      stopSlideshowLoop();
     }
   });
 
@@ -430,6 +653,9 @@ function bindEvents() {
     }
     await requestWakeLockIfNeeded();
     refreshLoopForPhase();
+    if (state.slideshow.running) {
+      scheduleNextSlide();
+    }
   });
 
   window.addEventListener("pageshow", async () => {
@@ -441,6 +667,9 @@ function bindEvents() {
     }
     await requestWakeLockIfNeeded();
     refreshLoopForPhase();
+    if (state.slideshow.running) {
+      scheduleNextSlide();
+    }
   });
 
   if ("serviceWorker" in navigator) {
@@ -451,9 +680,13 @@ function bindEvents() {
 }
 
 ensureDateRollover(state);
+ensureSlideshowState();
 lastDayKey = state.currentDate;
 applySavedTheme();
 bindEvents();
 syncUi({ forceTimer: true, forceStatic: true, forceThemes: true });
 refreshLoopForPhase();
+if (state.slideshow.running) {
+  scheduleNextSlide();
+}
 persist();
