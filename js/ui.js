@@ -164,12 +164,14 @@ export function createUi() {
     qs("setting-wake-lock").checked = settings.wakeLock;
   }
 
+  const getImageSrc = (image) => (image && (image.src || image.dataUrl)) || "";
+
   function renderSlideshow(slideshow, onDelete) {
     const allImages = Array.isArray(slideshow.images) ? slideshow.images : [];
     const order = Array.isArray(slideshow.order) ? slideshow.order : [];
-    const renderableImages = allImages.filter((image) => image && typeof image.dataUrl === "string" && image.dataUrl.length > 0);
+    const renderableImages = allImages.filter((image) => image && getImageSrc(image));
     const orderedImages = order.length > 0
-      ? order.filter((i) => Number.isInteger(i) && i >= 0 && i < allImages.length).map((i) => allImages[i]).filter((image) => image && typeof image.dataUrl === "string" && image.dataUrl.length > 0)
+      ? order.filter((i) => Number.isInteger(i) && i >= 0 && i < allImages.length).map((i) => allImages[i]).filter((image) => image && getImageSrc(image))
       : renderableImages;
     const safeIndex = Math.min(Math.max(Number.isInteger(slideshow.currentIndex) ? slideshow.currentIndex : 0, 0), Math.max(orderedImages.length - 1, 0));
     const currentImage = orderedImages[safeIndex] || orderedImages[0] || null;
@@ -183,8 +185,9 @@ export function createUi() {
     elements.slideshowClearButton.disabled = renderableImages.length === 0;
 
     if (currentImage) {
-      if (elements.slideshowImageCurrent.src !== currentImage.dataUrl) {
-        elements.slideshowImageCurrent.src = currentImage.dataUrl;
+      const currentSrc = getImageSrc(currentImage);
+      if (elements.slideshowImageCurrent.src !== currentSrc) {
+        elements.slideshowImageCurrent.src = currentSrc;
       }
       elements.slideshowImageCurrent.classList.add("active");
     } else {
@@ -198,7 +201,8 @@ export function createUi() {
     orderedImages.forEach((image, index) => {
       const thumb = document.createElement("article");
       thumb.className = `slideshow-thumb${index === safeIndex ? " active" : ""}`;
-      thumb.innerHTML = `<img src="${image.dataUrl}" alt="${image.name}" class="slideshow-thumb-image" /><div class="slideshow-thumb-footer"><div class="slideshow-thumb-name"></div></div>`;
+      const imgSrc = getImageSrc(image);
+      thumb.innerHTML = `<img src="${imgSrc}" alt="${image.name}" class="slideshow-thumb-image" /><div class="slideshow-thumb-footer"><div class="slideshow-thumb-name"></div></div>`;
       thumb.querySelector(".slideshow-thumb-name").textContent = image.name;
 
       const deleteButton = document.createElement("button");
