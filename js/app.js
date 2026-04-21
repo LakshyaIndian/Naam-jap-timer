@@ -37,63 +37,52 @@ let slideshowPersistenceAvailable = true;
 
 const persist = (message) => {
   const ok = saveState(state);
-  if (!ok && message) {
-    ui.setSettingsMessage(message);
-  }
+  if (!ok && message) ui.setSlideshowMessage(message);
   return ok;
 };
 
+const getImageSource = (image) => {
+  if (!image || typeof image !== "object") return "";
+  if (typeof image.src === "string" && image.src.length > 0) return image.src;
+  if (typeof image.dataUrl === "string" && image.dataUrl.length > 0) return image.dataUrl;
+  return "";
+};
+
+const isBlobUrl = (value) => typeof value === "string" && value.startsWith("blob:");
+
+function revokeImageSource(image) {
+  const src = image?.src;
+  if (isBlobUrl(src)) {
+    try { URL.revokeObjectURL(src); } catch {}
+  }
+}
+
+function revokeImageList(images) {
+  (images || []).forEach(revokeImageSource);
+}
+
 function formatTodayLabel() {
-  return new Date().toLocaleDateString(undefined, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  });
+  return new Date().toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 }
 
 function applySavedTheme() {
-  if (!isValidTheme(state.theme)) {
-    state.theme = "deep-maroon-devotional";
-  }
+  if (!isValidTheme(state.theme)) state.theme = "deep-maroon-devotional";
   applyTheme(state.theme);
 }
 
 async function requestWakeLockIfNeeded() {
-  if (!state.settings.wakeLock || state.timer.phase !== "running" || !("wakeLock" in navigator)) {
-    return;
-  }
-  try {
-    wakeLock = await navigator.wakeLock.request("screen");
-  } catch {
-    wakeLock = null;
-  }
+  if (!state.settings.wakeLock || state.timer.phase !== "running" || !("wakeLock" in navigator)) return;
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch { wakeLock = null; }
 }
 
 async function releaseWakeLock() {
-  try {
-    if (wakeLock) {
-      await wakeLock.release();
-    }
-  } catch {
-    // no-op
-  } finally {
-    wakeLock = null;
-  }
+  try { if (wakeLock) await wakeLock.release(); } catch {} finally { wakeLock = null; }
 }
 
 function ensureSlideshowState() {
   if (!state.slideshow || typeof state.slideshow !== "object") {
-    state.slideshow = {
-      images: [],
-      running: false,
-      currentIndex: 0,
-      order: [],
-      intervalMs: 5000,
-      lastStartedAt: null
-    };
+    state.slideshow = { images: [], running: false, currentIndex: 0, order: [], intervalMs: 5000, lastStartedAt: null };
   }
-
   state.slideshow.images = Array.isArray(state.slideshow.images) ? state.slideshow.images.slice(0, MAX_SLIDESHOW_IMAGES) : [];
   state.slideshow.intervalMs = Number.isFinite(state.slideshow.intervalMs) ? state.slideshow.intervalMs : 5000;
   state.slideshow.currentIndex = Number.isInteger(state.slideshow.currentIndex) ? state.slideshow.currentIndex : 0;
@@ -101,7 +90,7 @@ function ensureSlideshowState() {
 }
 
 function getRenderableImages() {
-  return state.slideshow.images.filter((image) => image && typeof image.id === "string" && typeof image.name === "string" && typeof image.dataUrl === "string" && image.dataUrl.length > 0);
+  return state.slideshow.images.filter((image) => image && typeof image.id === "string" && typeof image.name === "string" && getImageSource(image));
 }
 
 function syncSlideshowState(images, currentImageId = null) {
@@ -126,15 +115,15 @@ function syncSlideshowState(images, currentImageId = null) {
 async function hydrateSlideshowImages() {
   ensureSlideshowState();
   const embeddedImages = getRenderableImages();
-
   try {
-    if (embeddedImages.length) {
-      await saveSlideshowImages(embeddedImages);
+    if (embeddedImages.some((image) => typeof image.dataUrl === "string" && image.dataUrl.length > 0)) {
+      await saveSlideshowImages(embeddedImages.map((image) => ({ id: image.id, name: image.name, dataUrl: image.dataUrl })));
     }
 
     const dbImages = await loadSlideshowImages();
     const validDbImages = Array.isArray(dbImages)
       ? dbImages.filter((image) => image && typeof image.id === "string" && typeof image.name === "string" && typeof image.dataUrl === "string")
+        .map((image) => ({ id: image.id, name: image.name, dataUrl: image.dataUrl, src: image.dataUrl }))
       : [];
 
     if (validDbImages.length) {
@@ -151,11 +140,8 @@ async function hydrateSlideshowImages() {
   } catch {
     syncSlideshowState(embeddedImages, embeddedImages[state.slideshow.currentIndex]?.id || null);
     slideshowPersistenceAvailable = false;
-    if (embeddedImages.length) {
-      ui.setSlideshowMessage("Slideshow images are available for this session. Persistent storage is unavailable right now.");
-    }
+    if (embeddedImages.length) ui.setSlideshowMessage("Slideshow images are available for this session. Persistent storage is unavailable right now.");
   }
-
   persist();
 }
 
@@ -171,46 +157,32 @@ function ensureFreshState() {
 
 function getOrderedSlideshowImages() {
   const images = getRenderableImages();
-  if (!images.length) {
-    return [];
-  }
-
+  if (!images.length) return [];
   const validOrder = state.slideshow.order.filter((index) => index >= 0 && index < images.length);
   return validOrder.length ? validOrder.map((index) => images[index]).filter(Boolean) : images;
 }
 
 function getNextOrderedSlide() {
   const orderedImages = getOrderedSlideshowImages();
-  if (!orderedImages.length) {
-    return null;
-  }
-  if (orderedImages.length === 1) {
-    return orderedImages[0];
-  }
+  if (!orderedImages.length) return null;
+  if (orderedImages.length === 1) return orderedImages[0];
   const nextIndex = (state.slideshow.currentIndex + 1) % orderedImages.length;
   return orderedImages[nextIndex] || null;
 }
 
 async function preloadUpcomingSlide() {
   const nextImage = getNextOrderedSlide();
-  if (!nextImage) {
+  const src = getImageSource(nextImage);
+  if (!src) {
     nextSlidePreloader = null;
     preloadedSlideId = null;
     return;
   }
-  if (preloadedSlideId === nextImage.id) {
-    return;
-  }
+  if (preloadedSlideId === nextImage.id) return;
   const img = new Image();
   img.decoding = "async";
-  img.src = nextImage.dataUrl;
-  try {
-    if (typeof img.decode === "function") {
-      await img.decode();
-    }
-  } catch {
-    // ignore decode failures
-  }
+  img.src = src;
+  try { if (typeof img.decode === "function") await img.decode(); } catch {}
   nextSlidePreloader = img;
   preloadedSlideId = nextImage.id;
 }
@@ -235,32 +207,19 @@ function renderTimerUi(force = false) {
   const phase = state.timer.phase;
   const remainingMs = timer.getRemainingMs(Date.now());
   const displaySecond = Math.ceil(remainingMs / 1000);
-
-  if (!force && phase === timerUiLastPhase && displaySecond === timerUiLastSecond) {
-    return;
-  }
-
-  ui.renderTimer({
-    phase,
-    remainingMs,
-    progress: timer.getProgress(Date.now())
-  });
+  if (!force && phase === timerUiLastPhase && displaySecond === timerUiLastSecond) return;
+  ui.renderTimer({ phase, remainingMs, progress: timer.getProgress(Date.now()) });
   timerUiLastPhase = phase;
   timerUiLastSecond = displaySecond;
 }
 
 function renderStaticUi(forceThemes = false) {
   const stats = getStats(state.history);
-  ui.renderStats({
-    ...stats,
-    todayLabel: formatTodayLabel(),
-    showStatsOnHome: state.settings.showStatsOnHome
-  });
+  ui.renderStats({ ...stats, todayLabel: formatTodayLabel(), showStatsOnHome: state.settings.showStatsOnHome });
   ui.renderHistorySummary(stats);
   ui.renderHistoryGroups(getGroupedHistory(state.history));
   ui.renderSettings(state.settings);
   ui.renderSlideshow(state.slideshow, handleDeleteSlideshowImage);
-
   if (!hasRenderedThemeGrid || forceThemes) {
     ui.renderThemes(state.theme, handleThemeChange);
     hasRenderedThemeGrid = true;
@@ -270,35 +229,19 @@ function renderStaticUi(forceThemes = false) {
 function syncUi({ forceTimer = false, forceStatic = false, forceThemes = false } = {}) {
   const { dayChanged, timerJustCompleted } = ensureFreshState();
   renderTimerUi(forceTimer || dayChanged || timerJustCompleted);
-
-  if (forceStatic || dayChanged || lastDayKey !== state.currentDate) {
-    renderStaticUi(forceThemes);
-  }
-
-  if (state.timer.phase === "completed-awaiting-decision" && !state.timer.completionHandled) {
-    handleCompletionEffects();
-  }
+  if (forceStatic || dayChanged || lastDayKey !== state.currentDate) renderStaticUi(forceThemes);
+  if (state.timer.phase === "completed-awaiting-decision" && !state.timer.completionHandled) handleCompletionEffects();
 }
 
-function commitState(options = {}) {
-  persist();
-  syncUi(options);
-}
+function commitState(options = {}) { persist(); syncUi(options); }
 
 function startTimerLoop() {
-  if (animationFrameId !== null) {
-    return;
-  }
-
+  if (animationFrameId !== null) return;
   const tick = () => {
     animationFrameId = null;
     syncUi({ forceTimer: false, forceStatic: false });
-
-    if (state.timer.phase === "running") {
-      animationFrameId = requestAnimationFrame(tick);
-    }
+    if (state.timer.phase === "running") animationFrameId = requestAnimationFrame(tick);
   };
-
   animationFrameId = requestAnimationFrame(tick);
 }
 
@@ -310,9 +253,8 @@ function stopTimerLoop() {
 }
 
 function refreshLoopForPhase() {
-  if (state.timer.phase === "running") {
-    startTimerLoop();
-  } else {
+  if (state.timer.phase === "running") startTimerLoop();
+  else {
     stopTimerLoop();
     syncUi({ forceTimer: true, forceStatic: false });
   }
@@ -321,17 +263,13 @@ function refreshLoopForPhase() {
 function transitionToSlide(nextImage) {
   const current = ui.elements.slideshowImageCurrent;
   const upcoming = ui.elements.slideshowImageNext;
-
-  if (!nextImage || slideshowTransitionBusy) {
-    return;
-  }
-
+  const src = getImageSource(nextImage);
+  if (!src || slideshowTransitionBusy) return;
   slideshowTransitionBusy = true;
-  upcoming.src = nextImage.dataUrl;
+  upcoming.src = src;
   upcoming.classList.add("active");
-
   window.setTimeout(() => {
-    current.src = nextImage.dataUrl;
+    current.src = src;
     current.classList.add("active");
     upcoming.classList.remove("active");
     upcoming.removeAttribute("src");
@@ -344,10 +282,7 @@ function transitionToSlide(nextImage) {
 
 function scheduleNextSlide() {
   stopSlideshowLoop();
-  if (!state.slideshow.running || getRenderableImages().length <= 1) {
-    return;
-  }
-
+  if (!state.slideshow.running || getRenderableImages().length <= 1) return;
   preloadUpcomingSlide();
   slideshowTimeoutId = window.setTimeout(() => {
     advanceSlideshow();
@@ -361,7 +296,6 @@ function startSlideshow() {
     ui.setSlideshowMessage("Add at least one image before starting the slideshow.");
     return;
   }
-
   state.slideshow.order = shuffleIndexes(images.length);
   state.slideshow.currentIndex = 0;
   state.slideshow.running = true;
@@ -381,18 +315,13 @@ function stopSlideshow() {
 
 function advanceSlideshow() {
   const orderedImages = getOrderedSlideshowImages();
-  if (!orderedImages.length) {
-    stopSlideshow();
-    return;
-  }
-
+  if (!orderedImages.length) return stopSlideshow();
   if (orderedImages.length === 1) {
     state.slideshow.currentIndex = 0;
     preloadUpcomingSlide();
     commitState({ forceStatic: true });
     return;
   }
-
   state.slideshow.currentIndex = (state.slideshow.currentIndex + 1) % orderedImages.length;
   transitionToSlide(orderedImages[state.slideshow.currentIndex]);
   persist();
@@ -400,20 +329,15 @@ function advanceSlideshow() {
 
 async function handleDeleteSlideshowImage(imageId) {
   const orderedImages = getOrderedSlideshowImages();
-  if (!orderedImages.length) {
-    return;
-  }
-
+  if (!orderedImages.length) return;
   const currentImageId = orderedImages[state.slideshow.currentIndex]?.id ?? null;
+  const removed = orderedImages.find((image) => image.id === imageId);
   const remainingImages = orderedImages.filter((image) => image.id !== imageId);
+  if (removed) revokeImageSource(removed);
   syncSlideshowState(remainingImages, currentImageId === imageId ? remainingImages[0]?.id ?? null : currentImageId);
 
   if (slideshowPersistenceAvailable) {
-    try {
-      await deleteSlideshowImageRecord(imageId);
-    } catch {
-      ui.setSlideshowMessage("Could not delete image from device storage right now.");
-    }
+    try { await deleteSlideshowImageRecord(imageId); } catch { ui.setSlideshowMessage("Could not delete image from device storage right now."); }
   }
 
   if (!remainingImages.length) {
@@ -426,6 +350,15 @@ async function handleDeleteSlideshowImage(imageId) {
 
   preloadUpcomingSlide();
   commitState({ forceStatic: true });
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
 }
 
 async function handleSlideshowFiles(files) {
@@ -442,55 +375,58 @@ async function handleSlideshowFiles(files) {
     return;
   }
 
-  const filesToRead = validFiles.slice(0, remainingSlots);
-  const readers = filesToRead.map((file) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      name: file.name,
-      dataUrl: reader.result
-    });
-    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
-    reader.readAsDataURL(file);
+  const filesToUse = validFiles.slice(0, remainingSlots);
+  const immediateImages = filesToUse.map((file) => ({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    name: file.name,
+    src: URL.createObjectURL(file)
   }));
 
+  const mergedImages = [...existingImages, ...immediateImages].slice(0, MAX_SLIDESHOW_IMAGES);
+  syncSlideshowState(mergedImages, immediateImages[0]?.id ?? mergedImages[0]?.id ?? null);
+  state.slideshow.running = false;
+  stopSlideshowLoop();
+  nextSlidePreloader = null;
+  preloadedSlideId = null;
+  syncUi({ forceStatic: true });
+  preloadUpcomingSlide();
+
+  if (validFiles.length > remainingSlots) {
+    ui.setSlideshowMessage(`Added ${immediateImages.length} image${immediateImages.length === 1 ? "" : "s"}. Limit is ${MAX_SLIDESHOW_IMAGES}.`);
+  } else {
+    ui.setSlideshowMessage(`${immediateImages.length} image${immediateImages.length === 1 ? "" : "s"} added.`);
+  }
+
   try {
-    const images = await Promise.all(readers);
-    const mergedImages = [...existingImages, ...images].slice(0, MAX_SLIDESHOW_IMAGES);
-    syncSlideshowState(mergedImages, mergedImages[0]?.id ?? null);
-    state.slideshow.running = false;
-    stopSlideshowLoop();
-    nextSlidePreloader = null;
-    preloadedSlideId = null;
-    syncUi({ forceStatic: true });
-    preloadUpcomingSlide();
+    const persistentImages = await Promise.all(filesToUse.map(async (file, index) => ({
+      id: immediateImages[index].id,
+      name: file.name,
+      dataUrl: await fileToDataUrl(file)
+    })));
+
+    persistentImages.forEach((persistent) => {
+      const target = state.slideshow.images.find((image) => image.id === persistent.id);
+      if (target) target.dataUrl = persistent.dataUrl;
+    });
 
     if (slideshowPersistenceAvailable) {
       try {
-        await addSlideshowImages(images);
+        await addSlideshowImages(persistentImages);
       } catch {
         slideshowPersistenceAvailable = false;
         ui.setSlideshowMessage("Images were added for this session, but device storage is unavailable, so they may not persist after reload.");
       }
     }
 
-    if (!persist()) {
-      ui.setSlideshowMessage("Images were added for this session, but metadata could not be saved for future reloads.");
-    } else if (validFiles.length > remainingSlots) {
-      ui.setSlideshowMessage(`Added ${images.length} image${images.length === 1 ? "" : "s"}. Limit is ${MAX_SLIDESHOW_IMAGES}.`);
-    } else if (slideshowPersistenceAvailable) {
-      ui.setSlideshowMessage(`${images.length} image${images.length === 1 ? "" : "s"} added.`);
-    }
+    persist("Images were added for this session, but metadata could not be saved for future reloads.");
   } catch (error) {
-    ui.setSlideshowMessage(error instanceof Error ? error.message : "Image upload failed.");
+    slideshowPersistenceAvailable = false;
+    ui.setSlideshowMessage(error instanceof Error ? `${error.message} Images still work in this session.` : "Images still work in this session, but persistence failed.");
   }
 }
 
 function handleThemeChange(id) {
-  if (!isValidTheme(id)) {
-    return;
-  }
-
+  if (!isValidTheme(id)) return;
   state.theme = id;
   applyTheme(state.theme);
   ui.setSettingsMessage(`Theme changed to ${ui.getThemeName(id)}.`);
@@ -498,16 +434,10 @@ function handleThemeChange(id) {
 }
 
 async function playCompletionSound() {
-  if (!state.settings.sound) {
-    return;
-  }
-
+  if (!state.settings.sound) return;
   try {
     audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioContext.state === "suspended") {
-      await audioContext.resume();
-    }
-
+    if (audioContext.state === "suspended") await audioContext.resume();
     const now = audioContext.currentTime;
     const oscillator = audioContext.createOscillator();
     const gain = audioContext.createGain();
@@ -521,18 +451,12 @@ async function playCompletionSound() {
     gain.connect(audioContext.destination);
     oscillator.start(now);
     oscillator.stop(now + 0.78);
-  } catch {
-    // ignore autoplay failures
-  }
+  } catch {}
 }
 
 function vibrateCompletion() {
   if (state.settings.vibration && "vibrate" in navigator) {
-    try {
-      navigator.vibrate([120, 60, 120]);
-    } catch {
-      // no-op
-    }
+    try { navigator.vibrate([120, 60, 120]); } catch {}
   }
 }
 
@@ -546,9 +470,7 @@ function handleCompletionEffects() {
 }
 
 async function maybeRestartTimerForSlideshow() {
-  if (ui.getActiveScreen() !== "slideshow") {
-    return;
-  }
+  if (ui.getActiveScreen() !== "slideshow") return;
   ensureDateRollover(state);
   timer.start();
   await requestWakeLockIfNeeded();
@@ -556,17 +478,13 @@ async function maybeRestartTimerForSlideshow() {
 }
 
 async function handleCountDecision(shouldCount) {
-  if (completionInFlight || state.timer.completionDecisionMade) {
-    return;
-  }
-
+  if (completionInFlight || state.timer.completionDecisionMade) return;
   completionInFlight = true;
   if (shouldCount) {
     state.timer.completionDecisionMade = true;
     ui.elements.countYesButton.disabled = true;
     incrementTodayCount(state);
   }
-
   timer.setIdle();
   ui.closeCompletionDialog();
   await maybeRestartTimerForSlideshow();
@@ -576,308 +494,119 @@ async function handleCountDecision(shouldCount) {
 }
 
 function registerServiceWorker() {
-  if (!("serviceWorker" in navigator)) {
-    return;
-  }
-
+  if (!("serviceWorker" in navigator)) return;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (serviceWorkerReloaded) {
-      return;
-    }
+    if (serviceWorkerReloaded) return;
     serviceWorkerReloaded = true;
     window.location.reload();
   });
-
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register("./sw.js");
       registration.update().catch(() => {});
-      if (registration.waiting) {
-        registration.waiting.postMessage({ type: "SKIP_WAITING" });
-      }
+      if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
       registration.addEventListener("updatefound", () => {
         const newWorker = registration.installing;
-        if (!newWorker) {
-          return;
-        }
+        if (!newWorker) return;
         newWorker.addEventListener("statechange", () => {
-          if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-            newWorker.postMessage({ type: "SKIP_WAITING" });
-          }
+          if (newWorker.state === "installed" && navigator.serviceWorker.controller) newWorker.postMessage({ type: "SKIP_WAITING" });
         });
       });
-    } catch {
-      // no-op
-    }
+    } catch {}
   });
 }
 
 function bindEvents() {
-  ui.bindNavigation(() => {
-    if (state.slideshow.running) {
-      scheduleNextSlide();
-    }
-  });
-
+  ui.bindNavigation(() => { if (state.slideshow.running) scheduleNextSlide(); });
   ui.elements.startButton.addEventListener("click", async () => {
-    ensureDateRollover(state);
-    timer.start();
-    await requestWakeLockIfNeeded();
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: true });
+    ensureDateRollover(state); timer.start(); await requestWakeLockIfNeeded(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true });
   });
-
   ui.elements.pauseButton.addEventListener("click", async () => {
-    timer.pause();
-    await releaseWakeLock();
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: false });
+    timer.pause(); await releaseWakeLock(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
   });
-
   ui.elements.resumeButton.addEventListener("click", async () => {
-    timer.resume();
-    await requestWakeLockIfNeeded();
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: false });
+    timer.resume(); await requestWakeLockIfNeeded(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
   });
-
   ui.elements.resetButton.addEventListener("click", async () => {
-    if (state.settings.confirmReset && !window.confirm("Reset the current 8-minute timer?")) {
-      return;
-    }
-    timer.reset();
-    await releaseWakeLock();
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: false });
+    if (state.settings.confirmReset && !window.confirm("Reset the current 8-minute timer?")) return;
+    timer.reset(); await releaseWakeLock(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: false });
   });
-
-  ui.elements.countYesButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    handleCountDecision(true);
-  });
-
-  ui.elements.countNoButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    handleCountDecision(false);
-  });
-
-  ui.elements.completionDialog.addEventListener("cancel", (event) => {
-    if (state.timer.phase === "completed-awaiting-decision") {
-      event.preventDefault();
-    }
-  });
-
-  ui.elements.slideshowAddButton.addEventListener("click", () => {
-    ui.elements.slideshowFileInput.click();
-  });
-
+  ui.elements.countYesButton.addEventListener("click", (event) => { event.preventDefault(); handleCountDecision(true); });
+  ui.elements.countNoButton.addEventListener("click", (event) => { event.preventDefault(); handleCountDecision(false); });
+  ui.elements.completionDialog.addEventListener("cancel", (event) => { if (state.timer.phase === "completed-awaiting-decision") event.preventDefault(); });
+  ui.elements.slideshowAddButton.addEventListener("click", () => { ui.elements.slideshowFileInput.click(); });
   ui.elements.slideshowFileInput.addEventListener("change", async (event) => {
-    const files = event.target.files;
-    event.target.value = "";
-    if (!files || !files.length) {
-      return;
-    }
-    await handleSlideshowFiles(files);
+    const files = event.target.files; event.target.value = ""; if (!files || !files.length) return; await handleSlideshowFiles(files);
   });
-
-  ui.elements.slideshowStartButton.addEventListener("click", () => {
-    startSlideshow();
-  });
-
-  ui.elements.slideshowStopButton.addEventListener("click", () => {
-    stopSlideshow();
-  });
-
+  ui.elements.slideshowStartButton.addEventListener("click", () => { startSlideshow(); });
+  ui.elements.slideshowStopButton.addEventListener("click", () => { stopSlideshow(); });
   ui.elements.slideshowClearButton.addEventListener("click", async () => {
-    if (!getRenderableImages().length) {
-      return;
-    }
-    if (!window.confirm("Clear all slideshow images?")) {
-      return;
-    }
-
+    const currentImages = getRenderableImages();
+    if (!currentImages.length) return;
+    if (!window.confirm("Clear all slideshow images?")) return;
+    revokeImageList(currentImages);
     syncSlideshowState([], null);
     stopSlideshowLoop();
     nextSlidePreloader = null;
     preloadedSlideId = null;
-
     if (slideshowPersistenceAvailable) {
-      try {
-        await clearSlideshowImages();
-      } catch {
-        ui.setSlideshowMessage("Could not clear slideshow storage completely.");
-      }
+      try { await clearSlideshowImages(); } catch { ui.setSlideshowMessage("Could not clear slideshow storage completely."); }
     }
-
     commitState({ forceStatic: true });
   });
-
   document.getElementById("export-button").addEventListener("click", () => {
-    downloadJson(`harivansh-mala-backup-${getLocalDateKey()}.json`, {
-      version: state.version,
-      exportedAt: new Date().toISOString(),
-      history: state.history
-    });
+    downloadJson(`harivansh-mala-backup-${getLocalDateKey()}.json`, { version: state.version, exportedAt: new Date().toISOString(), history: state.history });
     ui.setSettingsMessage("Backup exported.");
   });
-
-  document.getElementById("import-button").addEventListener("click", () => {
-    document.getElementById("import-file").click();
-  });
-
+  document.getElementById("import-button").addEventListener("click", () => { document.getElementById("import-file").click(); });
   document.getElementById("import-file").addEventListener("change", async (event) => {
-    const [file] = event.target.files || [];
-    event.target.value = "";
-    if (!file) {
-      return;
-    }
-
+    const [file] = event.target.files || []; event.target.value = ""; if (!file) return;
     try {
-      const imported = parseImportedState(await file.text());
-      mergeHistory(state.history, imported.history);
-      ensureDateRollover(state);
-      ui.setSettingsMessage("Backup imported successfully.");
-      commitState({ forceTimer: true, forceStatic: true });
-    } catch (error) {
-      ui.setSettingsMessage(error instanceof Error ? error.message : "Import failed.");
-    }
+      const imported = parseImportedState(await file.text()); mergeHistory(state.history, imported.history); ensureDateRollover(state); ui.setSettingsMessage("Backup imported successfully."); commitState({ forceTimer: true, forceStatic: true });
+    } catch (error) { ui.setSettingsMessage(error instanceof Error ? error.message : "Import failed."); }
   });
-
   document.getElementById("reset-today-button").addEventListener("click", () => {
-    if (state.settings.confirmReset && !window.confirm("Reset today's mala count?")) {
-      return;
-    }
-    resetTodayCount(state);
-    ui.setSettingsMessage("Today's count has been reset.");
-    commitState({ forceTimer: false, forceStatic: true });
+    if (state.settings.confirmReset && !window.confirm("Reset today's mala count?")) return;
+    resetTodayCount(state); ui.setSettingsMessage("Today's count has been reset."); commitState({ forceTimer: false, forceStatic: true });
   });
-
   document.getElementById("reset-all-button").addEventListener("click", async () => {
-    if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) {
-      return;
-    }
-
-    resetStoredState();
-    Object.assign(state, loadState());
-    ensureSlideshowState();
-    syncSlideshowState([], null);
-    timer.setIdle();
-    stopSlideshowLoop();
-    nextSlidePreloader = null;
-    preloadedSlideId = null;
-
-    if (slideshowPersistenceAvailable) {
-      try {
-        await clearSlideshowImages();
-      } catch {
-        // ignore
-      }
-    }
-
-    await releaseWakeLock();
-    applySavedTheme();
-    hasRenderedThemeGrid = false;
-    ui.setSettingsMessage("All data has been reset.");
-    refreshLoopForPhase();
-    commitState({ forceTimer: true, forceStatic: true, forceThemes: true });
+    if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) return;
+    revokeImageList(getRenderableImages());
+    resetStoredState(); Object.assign(state, loadState()); ensureSlideshowState(); syncSlideshowState([], null); timer.setIdle(); stopSlideshowLoop();
+    nextSlidePreloader = null; preloadedSlideId = null;
+    if (slideshowPersistenceAvailable) { try { await clearSlideshowImages(); } catch {} }
+    await releaseWakeLock(); applySavedTheme(); hasRenderedThemeGrid = false; ui.setSettingsMessage("All data has been reset."); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true, forceThemes: true });
   });
-
-  document.getElementById("setting-sound").addEventListener("change", (event) => {
-    state.settings.sound = event.target.checked;
-    persist();
-  });
-
-  document.getElementById("setting-vibration").addEventListener("change", (event) => {
-    state.settings.vibration = event.target.checked;
-    persist();
-  });
-
-  document.getElementById("setting-confirm-reset").addEventListener("change", (event) => {
-    state.settings.confirmReset = event.target.checked;
-    persist();
-  });
-
-  document.getElementById("setting-show-stats-home").addEventListener("change", (event) => {
-    state.settings.showStatsOnHome = event.target.checked;
-    commitState({ forceTimer: false, forceStatic: true });
-  });
-
+  document.getElementById("setting-sound").addEventListener("change", (event) => { state.settings.sound = event.target.checked; persist(); });
+  document.getElementById("setting-vibration").addEventListener("change", (event) => { state.settings.vibration = event.target.checked; persist(); });
+  document.getElementById("setting-confirm-reset").addEventListener("change", (event) => { state.settings.confirmReset = event.target.checked; persist(); });
+  document.getElementById("setting-show-stats-home").addEventListener("change", (event) => { state.settings.showStatsOnHome = event.target.checked; commitState({ forceTimer: false, forceStatic: true }); });
   document.getElementById("setting-wake-lock").addEventListener("change", async (event) => {
-    state.settings.wakeLock = event.target.checked;
-    if (!state.settings.wakeLock) {
-      await releaseWakeLock();
-    } else {
-      await requestWakeLockIfNeeded();
-    }
-    persist();
+    state.settings.wakeLock = event.target.checked; if (!state.settings.wakeLock) await releaseWakeLock(); else await requestWakeLockIfNeeded(); persist();
   });
-
-  window.addEventListener("beforeinstallprompt", (event) => {
-    event.preventDefault();
-    deferredInstallPrompt = event;
-    ui.elements.installButton.hidden = false;
-  });
-
+  window.addEventListener("beforeinstallprompt", (event) => { event.preventDefault(); deferredInstallPrompt = event; ui.elements.installButton.hidden = false; });
   ui.elements.installButton.addEventListener("click", async () => {
-    if (!deferredInstallPrompt) {
-      return;
-    }
-    deferredInstallPrompt.prompt();
-    try {
-      await deferredInstallPrompt.userChoice;
-    } catch {
-      // no-op
-    }
-    deferredInstallPrompt = null;
-    ui.elements.installButton.hidden = true;
+    if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); try { await deferredInstallPrompt.userChoice; } catch {} deferredInstallPrompt = null; ui.elements.installButton.hidden = true;
   });
-
   document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === "visible") {
       const result = ensureFreshState();
-      if (result.dayChanged || result.timerJustCompleted) {
-        commitState({ forceTimer: true, forceStatic: true });
-      } else {
-        syncUi({ forceTimer: true, forceStatic: false });
-      }
-      await requestWakeLockIfNeeded();
-      refreshLoopForPhase();
-      if (state.slideshow.running) {
-        scheduleNextSlide();
-      }
-    } else {
-      persist();
-      stopTimerLoop();
-      stopSlideshowLoop();
-    }
+      if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
+      else syncUi({ forceTimer: true, forceStatic: false });
+      await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
+    } else { persist(); stopTimerLoop(); stopSlideshowLoop(); }
   });
-
   window.addEventListener("focus", async () => {
     const result = ensureFreshState();
-    if (result.dayChanged || result.timerJustCompleted) {
-      commitState({ forceTimer: true, forceStatic: true });
-    } else {
-      syncUi({ forceTimer: true, forceStatic: false });
-    }
-    await requestWakeLockIfNeeded();
-    refreshLoopForPhase();
-    if (state.slideshow.running) {
-      scheduleNextSlide();
-    }
+    if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
+    else syncUi({ forceTimer: true, forceStatic: false });
+    await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
   });
-
   window.addEventListener("pageshow", async () => {
     const result = ensureFreshState();
-    if (result.dayChanged || result.timerJustCompleted) {
-      commitState({ forceTimer: true, forceStatic: true });
-    } else {
-      syncUi({ forceTimer: true, forceStatic: false });
-    }
-    await requestWakeLockIfNeeded();
-    refreshLoopForPhase();
-    if (state.slideshow.running) {
-      scheduleNextSlide();
-    }
+    if (result.dayChanged || result.timerJustCompleted) commitState({ forceTimer: true, forceStatic: true });
+    else syncUi({ forceTimer: true, forceStatic: false });
+    await requestWakeLockIfNeeded(); refreshLoopForPhase(); if (state.slideshow.running) scheduleNextSlide();
   });
 }
 
@@ -892,9 +621,7 @@ async function init() {
   await preloadUpcomingSlide();
   syncUi({ forceTimer: true, forceStatic: true, forceThemes: true });
   refreshLoopForPhase();
-  if (state.slideshow.running) {
-    scheduleNextSlide();
-  }
+  if (state.slideshow.running) scheduleNextSlide();
   persist();
 }
 
