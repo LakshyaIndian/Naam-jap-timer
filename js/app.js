@@ -143,7 +143,7 @@ async function hydrateSlideshowImages() {
     } else if (embeddedImages.length) {
       syncSlideshowState(embeddedImages, embeddedImages[state.slideshow.currentIndex]?.id || null);
       slideshowPersistenceAvailable = false;
-      ui.setSettingsMessage("Slideshow images are available for this session. Persistent storage is unavailable right now.");
+      ui.setSlideshowMessage("Slideshow images are available for this session. Persistent storage is unavailable right now.");
     } else {
       syncSlideshowState([], null);
       slideshowPersistenceAvailable = true;
@@ -152,7 +152,7 @@ async function hydrateSlideshowImages() {
     syncSlideshowState(embeddedImages, embeddedImages[state.slideshow.currentIndex]?.id || null);
     slideshowPersistenceAvailable = false;
     if (embeddedImages.length) {
-      ui.setSettingsMessage("Slideshow images are available for this session. Persistent storage is unavailable right now.");
+      ui.setSlideshowMessage("Slideshow images are available for this session. Persistent storage is unavailable right now.");
     }
   }
 
@@ -358,7 +358,7 @@ function scheduleNextSlide() {
 function startSlideshow() {
   const images = getRenderableImages();
   if (!images.length) {
-    ui.setSettingsMessage("Add at least one image before starting the slideshow.");
+    ui.setSlideshowMessage("Add at least one image before starting the slideshow.");
     return;
   }
 
@@ -396,7 +396,6 @@ function advanceSlideshow() {
   state.slideshow.currentIndex = (state.slideshow.currentIndex + 1) % orderedImages.length;
   transitionToSlide(orderedImages[state.slideshow.currentIndex]);
   persist();
-  ui.renderSlideshow(state.slideshow, handleDeleteSlideshowImage);
 }
 
 async function handleDeleteSlideshowImage(imageId) {
@@ -413,7 +412,7 @@ async function handleDeleteSlideshowImage(imageId) {
     try {
       await deleteSlideshowImageRecord(imageId);
     } catch {
-      ui.setSettingsMessage("Could not delete image from device storage right now.");
+      ui.setSlideshowMessage("Could not delete image from device storage right now.");
     }
   }
 
@@ -432,14 +431,14 @@ async function handleDeleteSlideshowImage(imageId) {
 async function handleSlideshowFiles(files) {
   const validFiles = [...files].filter((file) => file.type.startsWith("image/"));
   if (!validFiles.length) {
-    ui.setSettingsMessage("No valid image files were selected.");
+    ui.setSlideshowMessage("No valid image files were selected.");
     return;
   }
 
   const existingImages = getRenderableImages();
   const remainingSlots = MAX_SLIDESHOW_IMAGES - existingImages.length;
   if (remainingSlots <= 0) {
-    ui.setSettingsMessage(`Slideshow limit reached. You can keep up to ${MAX_SLIDESHOW_IMAGES} images.`);
+    ui.setSlideshowMessage(`Slideshow limit reached. You can keep up to ${MAX_SLIDESHOW_IMAGES} images.`);
     return;
   }
 
@@ -471,19 +470,19 @@ async function handleSlideshowFiles(files) {
         await addSlideshowImages(images);
       } catch {
         slideshowPersistenceAvailable = false;
-        ui.setSettingsMessage("Images were added for this session, but device storage is unavailable, so they may not persist after reload.");
+        ui.setSlideshowMessage("Images were added for this session, but device storage is unavailable, so they may not persist after reload.");
       }
     }
 
-    persist("Images were added for this session, but metadata could not be saved for future reloads.");
-
-    if (validFiles.length > remainingSlots) {
-      ui.setSettingsMessage(`Added ${images.length} image${images.length === 1 ? "" : "s"}. Limit is ${MAX_SLIDESHOW_IMAGES}.`);
+    if (!persist()) {
+      ui.setSlideshowMessage("Images were added for this session, but metadata could not be saved for future reloads.");
+    } else if (validFiles.length > remainingSlots) {
+      ui.setSlideshowMessage(`Added ${images.length} image${images.length === 1 ? "" : "s"}. Limit is ${MAX_SLIDESHOW_IMAGES}.`);
     } else if (slideshowPersistenceAvailable) {
-      ui.setSettingsMessage(`${images.length} image${images.length === 1 ? "" : "s"} added.`);
+      ui.setSlideshowMessage(`${images.length} image${images.length === 1 ? "" : "s"} added.`);
     }
   } catch (error) {
-    ui.setSettingsMessage(error instanceof Error ? error.message : "Image upload failed.");
+    ui.setSlideshowMessage(error instanceof Error ? error.message : "Image upload failed.");
   }
 }
 
@@ -706,7 +705,7 @@ function bindEvents() {
       try {
         await clearSlideshowImages();
       } catch {
-        ui.setSettingsMessage("Could not clear slideshow storage completely.");
+        ui.setSlideshowMessage("Could not clear slideshow storage completely.");
       }
     }
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "harivansh-mala-cache-v4";
+const CACHE_NAME = "harivansh-mala-cache-v5";
 const APP_SHELL_ASSETS = [
   "./",
   "./index.html",

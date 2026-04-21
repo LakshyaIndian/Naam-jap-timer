@@ -38,7 +38,8 @@ export function createUi() {
     slideshowEmpty: qs("slideshow-empty"),
     slideshowCounter: qs("slideshow-counter"),
     slideshowStatus: qs("slideshow-status"),
-    slideshowThumbs: qs("slideshow-thumbs")
+    slideshowThumbs: qs("slideshow-thumbs"),
+    slideshowMessage: qs("slideshow-message")
   };
 
   elements.progressRing.style.strokeDasharray = `${RING_CIRCUMFERENCE}`;
@@ -164,19 +165,22 @@ export function createUi() {
   }
 
   function renderSlideshow(slideshow, onDelete) {
-    const validImages = (Array.isArray(slideshow.images) ? slideshow.images : []).filter((image) => image && typeof image.dataUrl === "string" && image.dataUrl.length > 0);
-    const validOrder = (Array.isArray(slideshow.order) ? slideshow.order : []).filter((index) => Number.isInteger(index) && index >= 0 && index < validImages.length);
-    const orderedImages = validOrder.length ? validOrder.map((index) => validImages[index]).filter(Boolean) : validImages;
+    const allImages = Array.isArray(slideshow.images) ? slideshow.images : [];
+    const order = Array.isArray(slideshow.order) ? slideshow.order : [];
+    const renderableImages = allImages.filter((image) => image && typeof image.dataUrl === "string" && image.dataUrl.length > 0);
+    const orderedImages = order.length > 0
+      ? order.filter((i) => Number.isInteger(i) && i >= 0 && i < allImages.length).map((i) => allImages[i]).filter((image) => image && typeof image.dataUrl === "string" && image.dataUrl.length > 0)
+      : renderableImages;
     const safeIndex = Math.min(Math.max(Number.isInteger(slideshow.currentIndex) ? slideshow.currentIndex : 0, 0), Math.max(orderedImages.length - 1, 0));
     const currentImage = orderedImages[safeIndex] || orderedImages[0] || null;
     const hasRenderableImages = orderedImages.length > 0;
 
-    elements.slideshowCounter.textContent = `${validImages.length} image${validImages.length === 1 ? "" : "s"}`;
+    elements.slideshowCounter.textContent = `${renderableImages.length} image${renderableImages.length === 1 ? "" : "s"}`;
     elements.slideshowStatus.textContent = slideshow.running && hasRenderableImages ? "Running in random order" : "Stopped";
     elements.slideshowEmpty.hidden = hasRenderableImages;
     elements.slideshowStartButton.disabled = !hasRenderableImages;
     elements.slideshowStopButton.disabled = !slideshow.running;
-    elements.slideshowClearButton.disabled = validImages.length === 0;
+    elements.slideshowClearButton.disabled = renderableImages.length === 0;
 
     if (currentImage) {
       if (elements.slideshowImageCurrent.src !== currentImage.dataUrl) {
@@ -209,6 +213,10 @@ export function createUi() {
 
   const setSettingsMessage = (message) => {
     elements.settingsMessage.textContent = message;
+  };
+
+  const setSlideshowMessage = (message) => {
+    elements.slideshowMessage.textContent = message;
   };
 
   function showCompletionDialog(disableYes = false) {
@@ -255,6 +263,7 @@ export function createUi() {
     renderSettings,
     renderSlideshow,
     setSettingsMessage,
+    setSlideshowMessage,
     showCompletionDialog,
     closeCompletionDialog,
     bindNavigation,
