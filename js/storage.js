@@ -2,7 +2,7 @@ const STORAGE_KEY = "harivansh-mala-state-v1";
 const DB_NAME = "harivansh-mala-db";
 const DB_VERSION = 1;
 const IMAGE_STORE = "slideshow-images";
-export const MAX_SLIDESHOW_IMAGES = 50;
+export const MAX_SLIDESHOW_IMAGES = 200;
 
 const defaults = () => ({
   version: 1,
@@ -30,7 +30,8 @@ const defaults = () => ({
     currentIndex: 0,
     order: [],
     intervalMs: 5000,
-    lastStartedAt: null
+    lastStartedAt: null,
+    hiddenBuiltInIds: []
   }
 });
 
@@ -56,12 +57,18 @@ function sanitizeSlideshow(slideshow) {
         .map((item) => ({
           id: item.id,
           name: item.name,
-          ...(typeof item.dataUrl === "string" ? { dataUrl: item.dataUrl } : {})
+          ...(typeof item.dataUrl === "string" ? { dataUrl: item.dataUrl } : {}),
+          ...(typeof item.src === "string" ? { src: item.src } : {}),
+          ...(item.builtin === true ? { builtin: true } : {})
         }))
     : [];
 
   const order = Array.isArray(slideshow.order)
     ? slideshow.order.filter((index) => Number.isInteger(index) && index >= 0 && index < images.length)
+    : [];
+
+  const hiddenBuiltInIds = Array.isArray(slideshow.hiddenBuiltInIds)
+    ? slideshow.hiddenBuiltInIds.filter((id) => typeof id === "string")
     : [];
 
   return {
@@ -70,7 +77,8 @@ function sanitizeSlideshow(slideshow) {
     currentIndex: Number.isInteger(slideshow.currentIndex) ? Math.max(0, Math.min(slideshow.currentIndex, Math.max(order.length - 1, 0))) : 0,
     order,
     intervalMs: Number.isFinite(slideshow.intervalMs) && slideshow.intervalMs >= 1500 ? Math.floor(slideshow.intervalMs) : fallback.intervalMs,
-    lastStartedAt: Number.isFinite(slideshow.lastStartedAt) ? slideshow.lastStartedAt : null
+    lastStartedAt: Number.isFinite(slideshow.lastStartedAt) ? slideshow.lastStartedAt : null,
+    hiddenBuiltInIds
   };
 }
 
@@ -81,7 +89,14 @@ function stripStateForStorage(state) {
     slideshow: {
       ...slideshow,
       images: Array.isArray(slideshow.images)
-        ? slideshow.images.slice(0, MAX_SLIDESHOW_IMAGES).map((image) => ({ id: image.id, name: image.name }))
+        ? slideshow.images.slice(0, MAX_SLIDESHOW_IMAGES).map((image) => ({
+            id: image.id,
+            name: image.name,
+            ...(image.builtin === true ? { builtin: true } : {})
+          }))
+        : [],
+      hiddenBuiltInIds: Array.isArray(slideshow.hiddenBuiltInIds)
+        ? slideshow.hiddenBuiltInIds.filter((id) => typeof id === "string")
         : []
     }
   };
