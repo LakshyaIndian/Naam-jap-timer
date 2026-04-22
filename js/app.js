@@ -19,6 +19,7 @@ import { createUi } from "./ui.js";
 const state = loadState();
 const timer = createTimerApi(state);
 const ui = createUi();
+const slideshowStageEl = document.getElementById("slideshow-stage");
 let deferredInstallPrompt = null;
 let audioContext = null;
 let wakeLock = null;
@@ -49,6 +50,22 @@ const getImageSource = (image) => {
 };
 
 const isBlobUrl = (value) => typeof value === "string" && value.startsWith("blob:");
+
+function restartKenBurns(imageElement) {
+  if (!imageElement) return;
+  imageElement.classList.remove("slideshow-animate");
+  void imageElement.offsetWidth;
+  imageElement.classList.add("slideshow-animate");
+}
+
+function updateSlideshowPresentation() {
+  const isFullscreen = state.slideshow.running && ui.getActiveScreen() === "slideshow";
+  document.body.classList.toggle("slideshow-fullscreen", isFullscreen);
+  if (!isFullscreen) {
+    ui.elements.slideshowImageCurrent.classList.remove("slideshow-animate");
+    ui.elements.slideshowImageNext.classList.remove("slideshow-animate");
+  }
+}
 
 function revokeImageSource(image) {
   const src = image?.src;
@@ -273,6 +290,7 @@ function syncUi({ forceTimer = false, forceStatic = false, forceThemes = false }
   const { dayChanged, timerJustCompleted } = ensureFreshState();
   renderTimerUi(forceTimer || dayChanged || timerJustCompleted);
   if (forceStatic || dayChanged || lastDayKey !== state.currentDate) renderStaticUi(forceThemes);
+  updateSlideshowPresentation();
   if (state.timer.phase === "completed-awaiting-decision" && !state.timer.completionHandled) handleCompletionEffects();
 }
 
@@ -311,10 +329,13 @@ function transitionToSlide(nextImage) {
   slideshowTransitionBusy = true;
   upcoming.src = src;
   upcoming.classList.add("active");
+  restartKenBurns(upcoming);
   window.setTimeout(() => {
     current.src = src;
     current.classList.add("active");
+    restartKenBurns(current);
     upcoming.classList.remove("active");
+    upcoming.classList.remove("slideshow-animate");
     upcoming.removeAttribute("src");
     slideshowTransitionBusy = false;
     nextSlidePreloader = null;
@@ -344,6 +365,7 @@ function startSlideshow() {
   state.slideshow.running = true;
   state.slideshow.lastStartedAt = Date.now();
   commitState({ forceStatic: true });
+  restartKenBurns(ui.elements.slideshowImageCurrent);
   preloadUpcomingSlide();
   scheduleNextSlide();
 }
@@ -353,6 +375,8 @@ function stopSlideshow() {
   stopSlideshowLoop();
   nextSlidePreloader = null;
   preloadedSlideId = null;
+  ui.elements.slideshowImageCurrent.classList.remove("slideshow-animate");
+  ui.elements.slideshowImageNext.classList.remove("slideshow-animate");
   commitState({ forceStatic: true });
 }
 
@@ -361,6 +385,7 @@ function advanceSlideshow() {
   if (!orderedImages.length) return stopSlideshow();
   if (orderedImages.length === 1) {
     state.slideshow.currentIndex = 0;
+    restartKenBurns(ui.elements.slideshowImageCurrent);
     preloadUpcomingSlide();
     commitState({ forceStatic: true });
     return;
@@ -565,7 +590,10 @@ function registerServiceWorker() {
 }
 
 function bindEvents() {
-  ui.bindNavigation(() => { if (state.slideshow.running) scheduleNextSlide(); });
+  ui.bindNavigation((target) => {
+    if (state.slideshow.running) scheduleNextSlide();
+    if (target !== "slideshow") updateSlideshowPresentation();
+  });
   ui.elements.startButton.addEventListener("click", async () => {
     ensureDateRollover(state); timer.start(); await requestWakeLockIfNeeded(); refreshLoopForPhase(); commitState({ forceTimer: true, forceStatic: true });
   });
