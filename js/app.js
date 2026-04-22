@@ -81,12 +81,13 @@ async function releaseWakeLock() {
 
 function ensureSlideshowState() {
   if (!state.slideshow || typeof state.slideshow !== "object") {
-    state.slideshow = { images: [], running: false, currentIndex: 0, order: [], intervalMs: 5000, lastStartedAt: null };
+    state.slideshow = { images: [], running: false, currentIndex: 0, order: [], intervalMs: 5000, lastStartedAt: null, hiddenBuiltInIds: [] };
   }
   state.slideshow.images = Array.isArray(state.slideshow.images) ? state.slideshow.images.slice(0, MAX_SLIDESHOW_IMAGES) : [];
   state.slideshow.intervalMs = Number.isFinite(state.slideshow.intervalMs) ? state.slideshow.intervalMs : 5000;
   state.slideshow.currentIndex = Number.isInteger(state.slideshow.currentIndex) ? state.slideshow.currentIndex : 0;
   state.slideshow.order = Array.isArray(state.slideshow.order) ? state.slideshow.order.filter((index) => Number.isInteger(index)) : [];
+  state.slideshow.hiddenBuiltInIds = Array.isArray(state.slideshow.hiddenBuiltInIds) ? state.slideshow.hiddenBuiltInIds.filter((id) => typeof id === "string") : [];
 }
 
 function getRenderableImages() {
@@ -110,6 +111,48 @@ function syncSlideshowState(images, currentImageId = null) {
   } else {
     state.slideshow.currentIndex = Math.min(state.slideshow.currentIndex, safeImages.length - 1);
   }
+}
+
+async function loadBundledSlides() {
+  try {
+    const response = await fetch("./assets/slideshow/manifest.json", { cache: "no-store" });
+    if (!response.ok) return [];
+    const manifest = await response.json();
+    if (!Array.isArray(manifest)) return [];
+
+    const hiddenIds = new Set(state.slideshow.hiddenBuiltInIds || []);
+
+    return manifest
+      .filter((item) => item && typeof item.file === "string" && item.file.length > 0)
+      .map((item, index) => ({
+        id: `builtin-${item.index ?? index + 1}`,
+        name: item.file,
+        src: `./assets/slideshow/${item.file}`,
+        builtin: true,
+        width: Number.isFinite(item.width) ? item.width : null,
+        height: Number.isFinite(item.height) ? item.height : null
+      }))
+      .filter((slide) => !hiddenIds.has(slide.id));
+  } catch {
+    return [];
+  }
+}
+
+async function ensureBundledSlidesLoaded() {
+  const currentImages = getRenderableImages();
+  if (currentImages.length > 0) return;
+
+  const bundledSlides = await loadBundledSlides();
+  if (!bundledSlides.length) return;
+
+  syncSlideshowState(bundledSlides, bundledSlides[0]?.id || null);
+  state.slideshow.running = false;
+  stopSlideshowLoop();
+  nextSlidePreloader = null;
+  preloadedSlideId = null;
+  persist();
+  syncUi({ forceStatic: true });
+  ui.setSlideshowMessage(`${bundledSlides.length} built-in slideshow images loaded.`);
 }
 
 async function hydrateSlideshowImages() {
@@ -333,10 +376,15 @@ async function handleDeleteSlideshowImage(imageId) {
   const currentImageId = orderedImages[state.slideshow.currentIndex]?.id ?? null;
   const removed = orderedImages.find((image) => image.id === imageId);
   const remainingImages = orderedImages.filter((image) => image.id !== imageId);
-  if (removed) revokeImageSource(removed);
+
+  if (removed && !removed.builtin) revokeImageSource(removed);
+  if (removed?.builtin && !state.slideshow.hiddenBuiltInIds.includes(removed.id)) {
+    state.slideshow.hiddenBuiltInIds.push(removed.id);
+  }
+
   syncSlideshowState(remainingImages, currentImageId === imageId ? remainingImages[0]?.id ?? null : currentImageId);
 
-  if (slideshowPersistenceAvailable) {
+  if (removed && !removed.builtin && slideshowPersistenceAvailable) {
     try { await deleteSlideshowImageRecord(imageId); } catch { ui.setSlideshowMessage("Could not delete image from device storage right now."); }
   }
 
@@ -544,7 +592,13 @@ function bindEvents() {
     const currentImages = getRenderableImages();
     if (!currentImages.length) return;
     if (!window.confirm("Clear all slideshow images?")) return;
-    revokeImageList(currentImages);
+
+    const builtInIds = currentImages.filter((image) => image && image.builtin).map((image) => image.id);
+    if (builtInIds.length) {
+      state.slideshow.hiddenBuiltInIds = Array.from(new Set([...(state.slideshow.hiddenBuiltInIds || []), ...builtInIds]));
+    }
+
+    revokeImageList(currentImages.filter((image) => !image.builtin));
     syncSlideshowState([], null);
     stopSlideshowLoop();
     nextSlidePreloader = null;
@@ -571,7 +625,7 @@ function bindEvents() {
   });
   document.getElementById("reset-all-button").addEventListener("click", async () => {
     if (!window.confirm("Reset all mala data, history, timer state, and slideshow images? This cannot be undone.")) return;
-    revokeImageList(getRenderableImages());
+    revokeImageList(getRenderableImages().filter((image) => !image.builtin));
     resetStoredState(); Object.assign(state, loadState()); ensureSlideshowState(); syncSlideshowState([], null); timer.setIdle(); stopSlideshowLoop();
     nextSlidePreloader = null; preloadedSlideId = null;
     if (slideshowPersistenceAvailable) { try { await clearSlideshowImages(); } catch {} }
@@ -618,6 +672,7 @@ async function init() {
   bindEvents();
   registerServiceWorker();
   await hydrateSlideshowImages();
+  await ensureBundledSlidesLoaded();
   await preloadUpcomingSlide();
   syncUi({ forceTimer: true, forceStatic: true, forceThemes: true });
   refreshLoopForPhase();
