@@ -1,4 +1,4 @@
-const CACHE_NAME = "harivansh-mala-cache-v7";
+const CACHE_NAME = "harivansh-mala-cache-v8";
 const APP_SHELL_ASSETS = [
   "./",
   "./index.html",
@@ -70,10 +70,16 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   const isNavigation = event.request.mode === "navigate";
+  const isBundledSlideAsset = url.pathname.includes("/assets/slideshow/");
   const isAppCode = url.pathname.endsWith(".js") || url.pathname.endsWith(".css") || url.pathname.endsWith(".html") || url.pathname.endsWith("/Naam-jap-timer/") || url.pathname.endsWith("/Naam-jap-timer");
 
   if (isNavigation) {
     event.respondWith(networkFirst(event.request, "./index.html"));
+    return;
+  }
+
+  if (isBundledSlideAsset) {
+    event.respondWith(cacheFirst(event.request));
     return;
   }
 
